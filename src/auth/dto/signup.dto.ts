@@ -1,5 +1,11 @@
 import { AppRole } from '@prisma/client';
-import { ArrayMinSize, IsArray, IsEmail, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import { ArrayMinSize, IsArray, IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+
+export const SELF_SIGNUP_ROLES: AppRole[] = [
+  AppRole.engineer,
+  AppRole.contractor,
+  AppRole.site_representative,
+];
 
 export class SignupDto {
   @IsEmail()
@@ -25,6 +31,6 @@ export class SignupDto {
 
   @IsArray()
   @ArrayMinSize(1)
-  @IsEnum(AppRole, { each: true })
+  @IsIn(SELF_SIGNUP_ROLES, { each: true })
   roles: AppRole[];
 }
