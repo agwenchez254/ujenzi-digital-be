@@ -87,7 +87,7 @@ src/
 - Modify: `package.json` (add `prisma`, `@prisma/client`)
 
 **Interfaces:**
-- Produces: a running local Postgres on `localhost:5432` (db `ujenzi_digital`, user/pass `postgres`/`postgres`), a migrated schema with every model from the design spec, and a generated `@prisma/client` (exports `PrismaClient`, `AppRole`, `InspectionRequestStatus`, `InspectionStatus`, `RiskLevel`, `User`, `UserRole`, `RefreshToken`, `Site`, `InspectionRequest`, `Inspection`, `Media`, `Report`, `InspectionTemplate`, `AuditLog`, `Prisma` namespace).
+- Produces: a running local Postgres on `localhost:5433` (mapped to the container's internal 5432 — 5432 is already taken by an unrelated container on this host) (db `ujenzi_digital`, user/pass `postgres`/`postgres`), a migrated schema with every model from the design spec, and a generated `@prisma/client` (exports `PrismaClient`, `AppRole`, `InspectionRequestStatus`, `InspectionStatus`, `RiskLevel`, `User`, `UserRole`, `RefreshToken`, `Site`, `InspectionRequest`, `Inspection`, `Media`, `Report`, `InspectionTemplate`, `AuditLog`, `Prisma` namespace).
 
 - [ ] **Step 1: Install Prisma**
 
@@ -108,7 +108,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: ujenzi_digital
     ports:
-      - '5432:5432'
+      - '5433:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -119,7 +119,7 @@ volumes:
 - [ ] **Step 3: Create `.env.example`** (committed; real `.env` is gitignored already)
 
 ```
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ujenzi_digital?schema=public
+DATABASE_URL=postgresql://postgres:postgres@localhost:5433/ujenzi_digital?schema=public
 JWT_ACCESS_SECRET=replace-with-a-long-random-string
 JWT_REFRESH_SECRET=replace-with-a-different-long-random-string
 CSRF_SECRET=replace-with-another-long-random-string
