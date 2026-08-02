@@ -1,0 +1,187 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AppRole {
+  engineer
+  contractor
+  site_representative
+  administrator
+}
+
+enum InspectionRequestStatus {
+  pending
+  accepted
+  rejected
+  completed
+  in_progress
+}
+
+enum InspectionStatus {
+  draft
+  in_progress
+  submitted
+}
+
+enum RiskLevel {
+  low
+  medium
+  high
+  critical
+}
+
+model User {
+  id                   String   @id @default(uuid())
+  email                String   @unique
+  passwordHash         String?
+  googleId             String?  @unique
+  name                 String
+  phone                String?
+  company              String?
+  certificationDetails String?
+  avatarUrl            String?
+  status               String   @default("active") // active | inactive
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  roles            UserRole[]
+  refreshTokens    RefreshToken[]
+  sitesOwned       Site[]              @relation("ContractorSites")
+  requestsMade     InspectionRequest[] @relation("ContractorRequests")
+  requestsAssigned InspectionRequest[] @relation("EngineerRequests")
+  inspections      Inspection[]
+  auditLogs        AuditLog[]
+}
+
+model UserRole {
+  id     String  @id @default(uuid())
+  userId String
+  role   AppRole
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, role])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Site {
+  id                String   @id @default(uuid())
+  name              String
+  contractorId      String
+  latitude          Decimal  @db.Decimal(10, 8)
+  longitude         Decimal  @db.Decimal(11, 8)
+  geofenceRadius    Int      @default(100)
+  address           String
+  constructionPhase String?
+  status            String   @default("active") // active | inactive
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  contractor  User                @relation("ContractorSites", fields: [contractorId], references: [id])
+  requests    InspectionRequest[]
+  inspections Inspection[]
+}
+
+model InspectionRequest {
+  id            String                  @id @default(uuid())
+  siteId        String
+  contractorId  String
+  engineerId    String?
+  requestedDate DateTime                @db.Date
+  status        InspectionRequestStatus @default(pending)
+  notes         String?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  site        Site         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  contractor  User         @relation("ContractorRequests", fields: [contractorId], references: [id])
+  engineer    User?        @relation("EngineerRequests", fields: [engineerId], references: [id])
+  inspections Inspection[]
+}
+
+model Inspection {
+  id                 String            @id @default(uuid())
+  requestId          String
+  siteId             String
+  engineerId         String
+  startTime          DateTime?
+  endTime            DateTime?
+  latitude           Decimal?          @db.Decimal(10, 8)
+  longitude          Decimal?          @db.Decimal(11, 8)
+  checklistResponses Json              @default("[]") // [{ id, question, category, response, notes }]
+  notes              String?
+  observations       String?
+  riskLevel          RiskLevel?
+  recommendations    String?
+  status             InspectionStatus  @default(draft)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  request  InspectionRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  site     Site              @relation(fields: [siteId], references: [id])
+  engineer User              @relation(fields: [engineerId], references: [id])
+  media    Media[]
+  reports  Report[]
+}
+
+model Media {
+  id           String   @id @default(uuid())
+  inspectionId String
+  type         String   // photo | video
+  url          String
+  latitude     Decimal? @db.Decimal(10, 8)
+  longitude    Decimal? @db.Decimal(11, 8)
+  caption      String?
+  createdAt    DateTime @default(now())
+
+  inspection Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+}
+
+model Report {
+  id                String   @id @default(uuid())
+  inspectionId      String
+  pdfUrl            String?
+  engineerSignature String?
+  submissionDate    DateTime @default(now())
+  version           Int      @default(1)
+  createdAt         DateTime @default(now())
+
+  inspection Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+}
+
+model InspectionTemplate {
+  id             String   @id @default(uuid())
+  name           String
+  description    String?
+  checklistItems Json     @default("[]")
+  createdBy      String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  action     String
+  entityType String
+  entityId   String?
+  details    Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+}
