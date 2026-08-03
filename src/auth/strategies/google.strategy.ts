@@ -14,9 +14,12 @@ export interface GoogleProfile {
 export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
   constructor(configService: ConfigService) {
     super({
-      clientID: configService.get<string>('GOOGLE_CLIENT_ID')!,
-      clientSecret: configService.get<string>('GOOGLE_CLIENT_SECRET')!,
-      callbackURL: configService.get<string>('GOOGLE_CALLBACK_URL')!,
+      // Falls back to placeholders so the app can boot without Google credentials
+      // configured; /auth/google will simply fail until real values are set.
+      clientID: configService.get<string>('GOOGLE_CLIENT_ID') || 'not-configured',
+      clientSecret: configService.get<string>('GOOGLE_CLIENT_SECRET') || 'not-configured',
+      callbackURL:
+        configService.get<string>('GOOGLE_CALLBACK_URL') || 'http://localhost:3000/auth/google/callback',
       scope: ['email', 'profile'],
     });
   }
