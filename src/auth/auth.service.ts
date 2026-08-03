@@ -80,6 +80,13 @@ export class AuthService {
 
     if (!user) {
       const existingByEmail = await this.prisma.user.findUnique({ where: { email: profile.email } });
+
+      if (existingByEmail?.passwordHash) {
+        throw new ConflictException(
+          'An account with this email already exists. Log in with your password to link Google from account settings.',
+        );
+      }
+
       user = existingByEmail
         ? await this.prisma.user.update({
             where: { id: existingByEmail.id },
