@@ -11,6 +11,7 @@ import { CsrfMiddleware } from './common/csrf/csrf.middleware';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { PrismaModule } from './prisma/prisma.module';
+import { SitesModule } from './sites/sites.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -21,6 +22,7 @@ import { UsersModule } from './users/users.module';
     CommonModule,
     AuditLogModule,
     AuthModule,
+    SitesModule,
     UsersModule,
   ],
   controllers: [AppController],
