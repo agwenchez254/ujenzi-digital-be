@@ -3,6 +3,9 @@
 /node_modules
 /build
 
+# Uploaded files
+/uploads
+
 # Claude Code worktrees
 /.claude/
 
