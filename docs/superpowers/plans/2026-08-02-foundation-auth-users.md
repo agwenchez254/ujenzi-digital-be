@@ -89,14 +89,14 @@ src/
 **Interfaces:**
 - Produces: a running local Postgres on `localhost:5433` (mapped to the container's internal 5432 — 5432 is already taken by an unrelated container on this host) (db `ujenzi_digital`, user/pass `postgres`/`postgres`), a migrated schema with every model from the design spec, and a generated `@prisma/client` (exports `PrismaClient`, `AppRole`, `InspectionRequestStatus`, `InspectionStatus`, `RiskLevel`, `User`, `UserRole`, `RefreshToken`, `Site`, `InspectionRequest`, `Inspection`, `Media`, `Report`, `InspectionTemplate`, `AuditLog`, `Prisma` namespace).
 
-- [ ] **Step 1: Install Prisma**
+- [x] **Step 1: Install Prisma**
 
 ```bash
 pnpm add @prisma/client
 pnpm add -D prisma
 ```
 
-- [ ] **Step 2: Create `docker-compose.yml`**
+- [x] **Step 2: Create `docker-compose.yml`**
 
 ```yaml
 services:
@@ -116,7 +116,7 @@ volumes:
   postgres_data:
 ```
 
-- [ ] **Step 3: Create `.env.example`** (committed; real `.env` is gitignored already)
+- [x] **Step 3: Create `.env.example`** (committed; real `.env` is gitignored already)
 
 ```
 DATABASE_URL=postgresql://postgres:postgres@localhost:5433/ujenzi_digital?schema=public
@@ -137,7 +137,7 @@ Copy it to a real `.env` for local dev:
 cp .env.example .env
 ```
 
-- [ ] **Step 4: Write `prisma/schema.prisma`**
+- [x] **Step 4: Write `prisma/schema.prisma`**
 
 ```prisma
 generator client {
@@ -329,7 +329,7 @@ model AuditLog {
 }
 ```
 
-- [ ] **Step 5: Start Postgres and run the initial migration**
+- [x] **Step 5: Start Postgres and run the initial migration**
 
 ```bash
 docker compose up -d
@@ -344,7 +344,7 @@ docker compose exec postgres psql -U postgres -d ujenzi_digital -c '\dt'
 
 Expected: a table list including `User`, `UserRole`, `RefreshToken`, `Site`, `InspectionRequest`, `Inspection`, `Media`, `Report`, `InspectionTemplate`, `AuditLog`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add docker-compose.yml .env.example prisma package.json pnpm-lock.yaml
@@ -363,7 +363,7 @@ git commit -m "feat: add docker-compose postgres and full prisma schema"
 - Consumes: `PrismaClient` from `@prisma/client` (Task 1).
 - Produces: `PrismaService` (injectable, extends `PrismaClient`), `PrismaModule` (`@Global()`, exports `PrismaService`) — every later module injects `PrismaService` via constructor.
 
-- [ ] **Step 1: Write `PrismaService`**
+- [x] **Step 1: Write `PrismaService`**
 
 ```typescript
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
@@ -381,7 +381,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 }
 ```
 
-- [ ] **Step 2: Write `PrismaModule`**
+- [x] **Step 2: Write `PrismaModule`**
 
 ```typescript
 import { Global, Module } from '@nestjs/common';
@@ -395,7 +395,7 @@ import { PrismaService } from './prisma.service';
 export class PrismaModule {}
 ```
 
-- [ ] **Step 3: Wire it into `AppModule` temporarily to verify it compiles**
+- [x] **Step 3: Wire it into `AppModule` temporarily to verify it compiles**
 
 Add `PrismaModule` to `AppModule`'s `imports` (the full `app.module.ts` rewrite happens in Task 4 — for now just add the import so the build step below actually exercises it):
 
@@ -408,7 +408,7 @@ import { PrismaModule } from './prisma/prisma.module';
 })
 ```
 
-- [ ] **Step 4: Build and verify**
+- [x] **Step 4: Build and verify**
 
 ```bash
 pnpm run build
@@ -416,7 +416,7 @@ pnpm run build
 
 Expected: compiles with no errors.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/prisma src/app.module.ts
@@ -436,14 +436,14 @@ git commit -m "feat: add global PrismaModule/PrismaService"
 - Consumes: nothing new.
 - Produces: `HttpExceptionFilter` (importable by `main.ts`), a bootstrap that applies `helmet()`, `cookie-parser`, CORS (`FRONTEND_ORIGIN`, `credentials: true`), a global `ValidationPipe({ whitelist: true, transform: true })`, and the global exception filter. `ConfigModule` becomes available for injection everywhere (wired into `AppModule` in Task 4).
 
-- [ ] **Step 1: Install dependencies**
+- [x] **Step 1: Install dependencies**
 
 ```bash
 pnpm add @nestjs/config cookie-parser class-validator class-transformer
 pnpm add -D @types/cookie-parser
 ```
 
-- [ ] **Step 2: Write `HttpExceptionFilter`**
+- [x] **Step 2: Write `HttpExceptionFilter`**
 
 ```typescript
 import {
@@ -485,7 +485,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
 }
 ```
 
-- [ ] **Step 3: Rewrite `src/main.ts`**
+- [x] **Step 3: Rewrite `src/main.ts`**
 
 ```typescript
 import { ValidationPipe } from '@nestjs/common';
@@ -517,7 +517,7 @@ async function bootstrap() {
 bootstrap();
 ```
 
-- [ ] **Step 4: Temporarily add `ConfigModule.forRoot({ isGlobal: true })` to `AppModule`** (full rewrite in Task 4; for now, just enough to build and run)
+- [x] **Step 4: Temporarily add `ConfigModule.forRoot({ isGlobal: true })` to `AppModule`** (full rewrite in Task 4; for now, just enough to build and run)
 
 ```typescript
 import { ConfigModule } from '@nestjs/config';
@@ -528,7 +528,7 @@ import { ConfigModule } from '@nestjs/config';
 })
 ```
 
-- [ ] **Step 5: Build and run**
+- [x] **Step 5: Build and run**
 
 ```bash
 pnpm run build
@@ -543,7 +543,7 @@ curl -i http://localhost:3000
 
 Expected: `200 OK` with `Hello World!` body, and response headers show helmet headers (e.g. `x-content-type-options: nosniff`). Stop the dev server (Ctrl+C).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/main.ts src/common src/app.module.ts package.json pnpm-lock.yaml
@@ -573,7 +573,7 @@ git commit -m "feat: add global helmet/cors/validation pipe/exception filter"
   - `Public()`, `AllowNoRole()`, `Roles(...roles: AppRole[])` decorators and `CurrentUser()` param decorator.
   - `JwtAuthGuard`, `RolesGuard` registered as global `APP_GUARD`s.
 
-- [ ] **Step 1: Write the auth payload types**
+- [x] **Step 1: Write the auth payload types**
 
 `src/auth/types/jwt-payload.type.ts`:
 
@@ -591,7 +591,7 @@ export interface AuthenticatedUser {
 }
 ```
 
-- [ ] **Step 2: Write the decorators**
+- [x] **Step 2: Write the decorators**
 
 `src/common/decorators/public.decorator.ts`:
 
@@ -636,7 +636,7 @@ export const CurrentUser = createParamDecorator(
 );
 ```
 
-- [ ] **Step 3: Write `JwtAuthGuard`**
+- [x] **Step 3: Write `JwtAuthGuard`**
 
 ```typescript
 import { ExecutionContext, Injectable } from '@nestjs/common';
@@ -663,7 +663,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
 }
 ```
 
-- [ ] **Step 4: Write `RolesGuard`**
+- [x] **Step 4: Write `RolesGuard`**
 
 ```typescript
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
@@ -718,7 +718,7 @@ export class RolesGuard implements CanActivate {
 }
 ```
 
-- [ ] **Step 5: Mark the existing root route `@Public()`**
+- [x] **Step 5: Mark the existing root route `@Public()`**
 
 Edit `src/app.controller.ts` — add the import and decorator to the existing `getHello()` handler:
 
@@ -739,7 +739,7 @@ export class AppController {
 }
 ```
 
-- [ ] **Step 6: Rewrite `src/app.module.ts`** with global guards and throttler (Auth/Users/AuditLog modules referenced here are filled in by later tasks — this compiles once Task 5/6/7 land; for now it references `AuthModule`/`UsersModule` which already exist as stubs)
+- [x] **Step 6: Rewrite `src/app.module.ts`** with global guards and throttler (Auth/Users/AuditLog modules referenced here are filled in by later tasks — this compiles once Task 5/6/7 land; for now it references `AuthModule`/`UsersModule` which already exist as stubs)
 
 ```typescript
 import { Module } from '@nestjs/common';
@@ -786,7 +786,7 @@ import { Global, Module } from '@nestjs/common';
 export class CommonModule {}
 ```
 
-- [ ] **Step 7: Build and verify**
+- [x] **Step 7: Build and verify**
 
 ```bash
 pnpm run build
@@ -794,7 +794,7 @@ pnpm run build
 
 Expected: compiles with no errors (the stub `AuthModule`/`UsersModule` controllers still exist from the original scaffold at this point).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/common src/auth/types src/app.controller.ts src/app.module.ts
@@ -816,7 +816,7 @@ git commit -m "feat: add RBAC decorators/guards and wire global guards"
 - Consumes: `PrismaService` (Task 2), `Roles()` decorator (Task 4).
 - Produces: `AuditLogService.log(userId: string | null, action: string, entityType: string, entityId: string | null, details?: Prisma.InputJsonValue, ipAddress?: string): Promise<void>` — this exact signature is called by `AuthService` (Task 8/11) and `UsersService` (Task 12). `AuditLogModule` exports `AuditLogService`.
 
-- [ ] **Step 1: Write the query DTO**
+- [x] **Step 1: Write the query DTO**
 
 `src/audit-log/dto/query-audit-log.dto.ts`:
 
@@ -856,7 +856,7 @@ export class QueryAuditLogDto {
 }
 ```
 
-- [ ] **Step 2: Write `AuditLogService`**
+- [x] **Step 2: Write `AuditLogService`**
 
 ```typescript
 import { Injectable } from '@nestjs/common';
@@ -901,7 +901,7 @@ export class AuditLogService {
 }
 ```
 
-- [ ] **Step 3: Write `AuditLogController`**
+- [x] **Step 3: Write `AuditLogController`**
 
 ```typescript
 import { Controller, Get, Query } from '@nestjs/common';
@@ -921,7 +921,7 @@ export class AuditLogController {
 }
 ```
 
-- [ ] **Step 4: Write `AuditLogModule`**
+- [x] **Step 4: Write `AuditLogModule`**
 
 ```typescript
 import { Module } from '@nestjs/common';
@@ -936,11 +936,11 @@ import { AuditLogService } from './audit-log.service';
 export class AuditLogModule {}
 ```
 
-- [ ] **Step 5: Import it into `AppModule`**
+- [x] **Step 5: Import it into `AppModule`**
 
 Add `AuditLogModule` to the `imports` array in `src/app.module.ts` (alphabetically alongside the others).
 
-- [ ] **Step 6: Build and verify**
+- [x] **Step 6: Build and verify**
 
 ```bash
 pnpm run build
@@ -948,7 +948,7 @@ pnpm run build
 
 Expected: compiles with no errors.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/audit-log src/app.module.ts
@@ -969,7 +969,7 @@ git commit -m "feat: add AuditLogModule with admin-only GET /audit-logs"
 - Consumes: `ConfigService` (Task 3), `CSRF_SECRET` env var.
 - Produces: `CsrfService.generateToken(req, res): string` (consumed by `AuthController`'s `GET /auth/csrf-token` in Task 8), `CsrfService.protect` (an Express middleware function, consumed by `CsrfMiddleware`). `CsrfMiddleware` is applied only to `POST /auth/refresh` and `POST /auth/logout`.
 
-- [ ] **Step 1: Write `CsrfService`**
+- [x] **Step 1: Write `CsrfService`**
 
 ```typescript
 import { Injectable } from '@nestjs/common';
@@ -1006,7 +1006,7 @@ export class CsrfService {
 }
 ```
 
-- [ ] **Step 2: Write `CsrfMiddleware`**
+- [x] **Step 2: Write `CsrfMiddleware`**
 
 ```typescript
 import { Injectable, NestMiddleware } from '@nestjs/common';
@@ -1023,7 +1023,7 @@ export class CsrfMiddleware implements NestMiddleware {
 }
 ```
 
-- [ ] **Step 3: Register both in `CommonModule`**
+- [x] **Step 3: Register both in `CommonModule`**
 
 ```typescript
 import { Global, Module } from '@nestjs/common';
@@ -1038,7 +1038,7 @@ import { CsrfService } from './csrf/csrf.service';
 export class CommonModule {}
 ```
 
-- [ ] **Step 4: Apply the middleware in `AppModule`**
+- [x] **Step 4: Apply the middleware in `AppModule`**
 
 Update `src/app.module.ts` to implement `NestModule`:
 
@@ -1060,7 +1060,7 @@ export class AppModule implements NestModule {
 }
 ```
 
-- [ ] **Step 5: Build and verify**
+- [x] **Step 5: Build and verify**
 
 ```bash
 pnpm run build
@@ -1068,7 +1068,7 @@ pnpm run build
 
 Expected: compiles with no errors. (Full runtime verification of the CSRF flow happens in Task 9, once `/auth/refresh` and `/auth/logout` exist.)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/common src/app.module.ts
@@ -1091,7 +1091,7 @@ git commit -m "feat: add CSRF double-submit protection scoped to refresh/logout"
 - Consumes: `AccessTokenPayload`, `AuthenticatedUser` (Task 4), `ConfigService`, `AuthService.validateCredentials` (defined in Task 8 — this task's `LocalStrategy` calls it, so build verification happens together with Task 8).
 - Produces: passport strategies named `'jwt'`, `'local'`, `'google'`; `LocalAuthGuard`, `GoogleAuthGuard`; exported type `GoogleProfile { googleId: string; email: string; name: string; avatarUrl?: string }` (consumed by `AuthService.loginWithGoogle` in Task 11).
 
-- [ ] **Step 1: Remove the stub scaffold files**
+- [x] **Step 1: Remove the stub scaffold files**
 
 ```bash
 rm src/auth/dto/create-auth.dto.ts src/auth/dto/update-auth.dto.ts
@@ -1099,7 +1099,7 @@ rm -r src/auth/entities
 rm src/auth/auth.controller.spec.ts src/auth/auth.service.spec.ts
 ```
 
-- [ ] **Step 2: Write `JwtStrategy`**
+- [x] **Step 2: Write `JwtStrategy`**
 
 ```typescript
 import { Injectable } from '@nestjs/common';
@@ -1124,7 +1124,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
 }
 ```
 
-- [ ] **Step 3: Write `LocalStrategy`**
+- [x] **Step 3: Write `LocalStrategy`**
 
 ```typescript
 import { Injectable, UnauthorizedException } from '@nestjs/common';
@@ -1148,7 +1148,7 @@ export class LocalStrategy extends PassportStrategy(Strategy) {
 }
 ```
 
-- [ ] **Step 4: Write `GoogleStrategy`**
+- [x] **Step 4: Write `GoogleStrategy`**
 
 ```typescript
 import { Injectable } from '@nestjs/common';
@@ -1191,7 +1191,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
 }
 ```
 
-- [ ] **Step 5: Write the two guards**
+- [x] **Step 5: Write the two guards**
 
 `src/auth/guards/local-auth.guard.ts`:
 
@@ -1213,9 +1213,9 @@ import { AuthGuard } from '@nestjs/passport';
 export class GoogleAuthGuard extends AuthGuard('google') {}
 ```
 
-- [ ] **Step 6: Build** (expected to still fail at this point — `AuthService.validateCredentials` doesn't exist until Task 8; that's fine, this task's code is exercised by Task 8's build step)
+- [x] **Step 6: Build** (expected to still fail at this point — `AuthService.validateCredentials` doesn't exist until Task 8; that's fine, this task's code is exercised by Task 8's build step)
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/auth/strategies src/auth/guards
@@ -1242,7 +1242,7 @@ git commit -m "feat: add jwt/local/google passport strategies, remove stub auth 
   - `AuthService.logout(rawRefreshToken: string | undefined, res: Response): Promise<void>`
   - (Google/complete-profile methods land in Task 11, same file.)
 
-- [ ] **Step 1: Write `SignupDto`**
+- [x] **Step 1: Write `SignupDto`**
 
 ```typescript
 import { AppRole } from '@prisma/client';
@@ -1277,7 +1277,7 @@ export class SignupDto {
 }
 ```
 
-- [ ] **Step 2: Rewrite `src/auth/auth.service.ts`**
+- [x] **Step 2: Rewrite `src/auth/auth.service.ts`**
 
 ```typescript
 import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
@@ -1460,7 +1460,7 @@ export class AuthService {
 }
 ```
 
-- [ ] **Step 3: Build**
+- [x] **Step 3: Build**
 
 ```bash
 pnpm run build
@@ -1468,7 +1468,7 @@ pnpm run build
 
 Expected: compiles with no errors (this also validates Task 7's `LocalStrategy`, which calls `validateCredentials`).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/auth/auth.service.ts src/auth/dto/signup.dto.ts
@@ -1487,7 +1487,7 @@ git commit -m "feat: implement AuthService signup/login/refresh/logout token iss
 - Consumes: `AuthService` (Task 8), `CsrfService` (Task 6), `Public()` (Task 4), `LocalAuthGuard` (Task 7).
 - Produces: `POST /auth/signup`, `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/csrf-token`.
 
-- [ ] **Step 1: Rewrite `src/auth/auth.controller.ts`**
+- [x] **Step 1: Rewrite `src/auth/auth.controller.ts`**
 
 ```typescript
 import {
@@ -1556,7 +1556,7 @@ export class AuthController {
 }
 ```
 
-- [ ] **Step 2: Rewrite `src/auth/auth.module.ts`**
+- [x] **Step 2: Rewrite `src/auth/auth.module.ts`**
 
 ```typescript
 import { Module } from '@nestjs/common';
@@ -1578,14 +1578,14 @@ export class AuthModule {}
 
 (`GoogleStrategy` is added to `providers` in Task 11, once the Google login flow is implemented — omitting it here keeps this task's build green without requiring `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` to be set yet.)
 
-- [ ] **Step 3: Build and run**
+- [x] **Step 3: Build and run**
 
 ```bash
 pnpm run build
 pnpm run start:dev
 ```
 
-- [ ] **Step 4: Manually verify signup**
+- [x] **Step 4: Manually verify signup**
 
 ```bash
 curl -i -X POST http://localhost:3000/auth/signup \
@@ -1595,7 +1595,7 @@ curl -i -X POST http://localhost:3000/auth/signup \
 
 Expected: `201 Created` (or `200`, depending on default Nest status for POST — verify and note actual code), JSON body with `accessToken`, `user.roles` = `["contractor"]`, `needsRoleSelection: false`, and a `Set-Cookie: refreshToken=...` header.
 
-- [ ] **Step 5: Manually verify login**
+- [x] **Step 5: Manually verify login**
 
 ```bash
 curl -i -X POST http://localhost:3000/auth/login \
@@ -1605,7 +1605,7 @@ curl -i -X POST http://localhost:3000/auth/login \
 
 Expected: `200 OK` with a fresh `accessToken` and `Set-Cookie: refreshToken=...`.
 
-- [ ] **Step 6: Manually verify refresh + CSRF rejection/acceptance**
+- [x] **Step 6: Manually verify refresh + CSRF rejection/acceptance**
 
 ```bash
 # Save the refreshToken cookie from Step 5's response, e.g. into $REFRESH_COOKIE
@@ -1624,9 +1624,9 @@ curl -i -b cookies.txt -b "refreshToken=$REFRESH_COOKIE" -H "x-csrf-token: <toke
 
 Expected: step 3 returns `200 OK` with a new `accessToken` and a rotated `Set-Cookie: refreshToken=...`. Re-running the exact same request with the now-stale `$REFRESH_COOKIE` should return `401 Unauthorized`.
 
-- [ ] **Step 7: Manually verify logout** (same CSRF-token dance as refresh) and then confirm `POST /auth/refresh` with the logged-out cookie returns `401`. Stop the dev server.
+- [x] **Step 7: Manually verify logout** (same CSRF-token dance as refresh) and then confirm `POST /auth/refresh` with the logged-out cookie returns `401`. Stop the dev server.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/auth/auth.controller.ts src/auth/auth.module.ts
@@ -1647,7 +1647,7 @@ git commit -m "feat: wire up auth signup/login/refresh/logout/csrf-token endpoin
 - Consumes: `GoogleProfile` (Task 7), `AllowNoRole()` (Task 4), `CurrentUser()` (Task 4).
 - Produces: `AuthService.loginWithGoogle(profile: GoogleProfile, res: Response): Promise<AuthResult>`, `AuthService.completeProfile(userId: string, dto: CompleteProfileDto, res: Response, ip?: string): Promise<AuthResult>`, routes `GET /auth/google`, `GET /auth/google/callback`, `POST /auth/complete-profile`.
 
-- [ ] **Step 1: Write `CompleteProfileDto`**
+- [x] **Step 1: Write `CompleteProfileDto`**
 
 ```typescript
 import { AppRole } from '@prisma/client';
@@ -1661,7 +1661,7 @@ export class CompleteProfileDto {
 }
 ```
 
-- [ ] **Step 2: Add `loginWithGoogle` and `completeProfile` to `AuthService`**
+- [x] **Step 2: Add `loginWithGoogle` and `completeProfile` to `AuthService`**
 
 Add these imports to the top of `src/auth/auth.service.ts`:
 
@@ -1719,7 +1719,7 @@ Add these two methods to the `AuthService` class (alongside `login`):
   }
 ```
 
-- [ ] **Step 3: Add Google + complete-profile routes to `AuthController`**
+- [x] **Step 3: Add Google + complete-profile routes to `AuthController`**
 
 Add these imports:
 
@@ -1762,7 +1762,7 @@ Add these routes to the `AuthController` class:
 
 Also import `GoogleProfile` type from `./strategies/google.strategy'`.
 
-- [ ] **Step 4: Register `GoogleStrategy` in `AuthModule`**
+- [x] **Step 4: Register `GoogleStrategy` in `AuthModule`**
 
 ```typescript
 import { GoogleStrategy } from './strategies/google.strategy';
@@ -1770,16 +1770,16 @@ import { GoogleStrategy } from './strategies/google.strategy';
 providers: [AuthService, JwtStrategy, LocalStrategy, GoogleStrategy],
 ```
 
-- [ ] **Step 5: Set real Google OAuth credentials in `.env`** (create a project in Google Cloud Console if you don't have test credentials; set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback`)
+- [x] **Step 5: Set real Google OAuth credentials in `.env`** (create a project in Google Cloud Console if you don't have test credentials; set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback`)
 
-- [ ] **Step 6: Build and run**
+- [x] **Step 6: Build and run**
 
 ```bash
 pnpm run build
 pnpm run start:dev
 ```
 
-- [ ] **Step 7: Manually verify the Google flow** — open `http://localhost:3000/auth/google` in a browser, complete the Google consent screen, and confirm the callback response JSON has `needsRoleSelection: true` and an empty `roles` array. Then, using the returned `accessToken`:
+- [x] **Step 7: Manually verify the Google flow** — open `http://localhost:3000/auth/google` in a browser, complete the Google consent screen, and confirm the callback response JSON has `needsRoleSelection: true` and an empty `roles` array. Then, using the returned `accessToken`:
 
 ```bash
 curl -i -X POST http://localhost:3000/auth/complete-profile \
@@ -1790,7 +1790,7 @@ curl -i -X POST http://localhost:3000/auth/complete-profile \
 
 Expected: `201`/`200` with `needsRoleSelection: false` and `user.roles: ["engineer"]`. Calling the same endpoint again with the same token should now return `403 Forbidden` (roles already set). Stop the dev server.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/auth
@@ -1813,7 +1813,7 @@ git commit -m "feat: add google oauth login and complete-profile role selection"
 - Consumes: `PrismaService` (Task 2), `AuditLogService` (Task 5), `Roles()`/`CurrentUser()` (Task 4).
 - Produces: `GET /users/me`, `PATCH /users/me`, `GET /users` (administrator), `PATCH /users/:id/status` (administrator), `PATCH /users/:id/roles` (administrator).
 
-- [ ] **Step 1: Write the three DTOs**
+- [x] **Step 1: Write the three DTOs**
 
 `src/users/dto/update-profile.dto.ts`:
 
@@ -1868,7 +1868,7 @@ export class UpdateRolesDto {
 }
 ```
 
-- [ ] **Step 2: Write `UsersService`**
+- [x] **Step 2: Write `UsersService`**
 
 ```typescript
 import { Injectable, NotFoundException } from '@nestjs/common';
@@ -1967,7 +1967,7 @@ export class UsersService {
 }
 ```
 
-- [ ] **Step 3: Write `UsersController`**
+- [x] **Step 3: Write `UsersController`**
 
 ```typescript
 import { Body, Controller, Get, Ip, Param, Patch } from '@nestjs/common';
@@ -2023,7 +2023,7 @@ export class UsersController {
 }
 ```
 
-- [ ] **Step 4: Rewrite `src/users/users.module.ts`**
+- [x] **Step 4: Rewrite `src/users/users.module.ts`**
 
 ```typescript
 import { Module } from '@nestjs/common';
@@ -2039,14 +2039,14 @@ import { UsersService } from './users.service';
 export class UsersModule {}
 ```
 
-- [ ] **Step 5: Build and run**
+- [x] **Step 5: Build and run**
 
 ```bash
 pnpm run build
 pnpm run start:dev
 ```
 
-- [ ] **Step 6: Manually verify the full RBAC stack**
+- [x] **Step 6: Manually verify the full RBAC stack**
 
 ```bash
 # Using the accessToken from a contractor signup (Task 9, Step 4):
@@ -2081,7 +2081,7 @@ curl -i http://localhost:3000/users -H "Authorization: Bearer <admin accessToken
 
 Expected: `200 OK` with both users listed. Stop the dev server.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/users
