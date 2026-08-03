@@ -26,8 +26,8 @@ async function bootstrap() {
     .setTitle('Ujenzi Digital API')
     .setDescription(
       'Errors are normalized to { statusCode, message, error } by a global exception filter. ' +
-        'Most routes require a Bearer access token; /auth/refresh and /auth/logout additionally ' +
-        'require an x-csrf-token header (see GET /auth/csrf-token).',
+      'Most routes require a Bearer access token; /auth/refresh and /auth/logout additionally ' +
+      'require an x-csrf-token header (see GET /auth/csrf-token).',
     )
     .setVersion('1.0')
     .addBearerAuth()
