@@ -11,6 +11,7 @@ import { CsrfMiddleware } from './common/csrf/csrf.middleware';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { InspectionRequestsModule } from './inspection-requests/inspection-requests.module';
+import { InspectionsModule } from './inspections/inspections.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SitesModule } from './sites/sites.module';
 import { UsersModule } from './users/users.module';
@@ -24,6 +25,7 @@ import { UsersModule } from './users/users.module';
     AuditLogModule,
     AuthModule,
     InspectionRequestsModule,
+    InspectionsModule,
     SitesModule,
     UsersModule,
   ],
