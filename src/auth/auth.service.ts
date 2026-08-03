@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AppRole, User } from '@prisma/client';
@@ -7,7 +7,9 @@ import { createHash, randomUUID } from 'crypto';
 import { Response } from 'express';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { CompleteProfileDto } from './dto/complete-profile.dto';
 import { SignupDto } from './dto/signup.dto';
+import { GoogleProfile } from './strategies/google.strategy';
 
 const REFRESH_COOKIE_NAME = 'refreshToken';
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -71,6 +73,50 @@ export class AuthService {
 
   async login(user: User, res: Response): Promise<AuthResult> {
     return this.issueTokens(user.id, res);
+  }
+
+  async loginWithGoogle(profile: GoogleProfile, res: Response): Promise<AuthResult> {
+    let user = await this.prisma.user.findUnique({ where: { googleId: profile.googleId } });
+
+    if (!user) {
+      const existingByEmail = await this.prisma.user.findUnique({ where: { email: profile.email } });
+      user = existingByEmail
+        ? await this.prisma.user.update({
+            where: { id: existingByEmail.id },
+            data: { googleId: profile.googleId },
+          })
+        : await this.prisma.user.create({
+            data: {
+              email: profile.email,
+              googleId: profile.googleId,
+              name: profile.name,
+              avatarUrl: profile.avatarUrl,
+            },
+          });
+    }
+
+    return this.issueTokens(user.id, res);
+  }
+
+  async completeProfile(
+    userId: string,
+    dto: CompleteProfileDto,
+    res: Response,
+    ip?: string,
+  ): Promise<AuthResult> {
+    const existingRoles = await this.getRoles(userId);
+    if (existingRoles.length > 0) {
+      throw new ForbiddenException('Profile roles already set');
+    }
+
+    await this.prisma.userRole.createMany({
+      data: dto.roles.map((role) => ({ userId, role })),
+      skipDuplicates: true,
+    });
+
+    await this.auditLogService.log(userId, 'user.roles_assigned', 'User', userId, { roles: dto.roles }, ip);
+
+    return this.issueTokens(userId, res);
   }
 
   async refresh(rawRefreshToken: string | undefined, res: Response): Promise<AuthResult> {
