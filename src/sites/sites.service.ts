@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Site } from '@prisma/client';
+import { Prisma, Site } from '@prisma/client';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/types/jwt-payload.type';
 import { PrismaService } from '../prisma/prisma.service';
@@ -7,7 +7,22 @@ import { CreateSiteDto } from './dto/create-site.dto';
 import { UpdateSiteDto } from './dto/update-site.dto';
 
 const CONTRACTOR_SELECT = { id: true, name: true, company: true } as const;
+const PERSONNEL_INCLUDE = {
+  personnel: {
+    include: { user: { select: { id: true, name: true, email: true } } },
+  },
+} as const;
 const EARTH_RADIUS_METERS = 6_371_000;
+
+export interface SiteWithinRadiusRow {
+  id: string;
+  name: string;
+  address: string;
+  latitude: Prisma.Decimal;
+  longitude: Prisma.Decimal;
+  geofenceRadius: number;
+  distanceMeters: number;
+}
 
 @Injectable()
 export class SitesService {
@@ -18,7 +33,7 @@ export class SitesService {
 
   findAll() {
     return this.prisma.site.findMany({
-      include: { contractor: { select: CONTRACTOR_SELECT } },
+      include: { contractor: { select: CONTRACTOR_SELECT }, ...PERSONNEL_INCLUDE },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -30,37 +45,99 @@ export class SitesService {
   async create(dto: CreateSiteDto, user: AuthenticatedUser, ip?: string) {
     const contractorId = this.resolveContractorId(dto.contractorId, user);
 
-    const site = await this.prisma.site.create({
-      data: {
-        name: dto.name,
-        contractorId,
-        latitude: dto.latitude,
-        longitude: dto.longitude,
-        geofenceRadius: dto.geofenceRadius,
-        address: dto.address,
-        constructionPhase: dto.constructionPhase,
-      },
-      include: { contractor: { select: CONTRACTOR_SELECT } },
+    const created = await this.prisma.$transaction(async (tx) => {
+      const site = await tx.site.create({
+        data: {
+          name: dto.name,
+          contractorId,
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+          geofenceRadius: dto.geofenceRadius,
+          address: dto.address,
+          constructionPhase: dto.constructionPhase,
+          developmentType: dto.developmentType,
+          country: dto.country,
+          county: dto.county,
+          constituency: dto.constituency,
+          town: dto.town,
+          plotNumber: dto.plotNumber,
+          landmarks: dto.landmarks,
+          approvals: dto.approvals as unknown as Prisma.InputJsonValue | undefined,
+        },
+      });
+
+      if (dto.personnel?.length) {
+        await tx.sitePersonnel.createMany({
+          data: dto.personnel.map((p) => ({
+            siteId: site.id,
+            role: p.role,
+            userId: p.userId,
+            name: p.name,
+            contact: p.contact,
+          })),
+        });
+      }
+
+      return site;
     });
 
-    await this.auditLogService.log(user.userId, 'site.created', 'Site', site.id, { contractorId }, ip);
+    await this.auditLogService.log(user.userId, 'site.created', 'Site', created.id, { contractorId }, ip);
 
-    return site;
+    return this.findSiteOrThrow(created.id);
   }
 
   async update(id: string, dto: UpdateSiteDto, user: AuthenticatedUser, ip?: string) {
     const site = await this.findSiteOrThrow(id);
     this.assertOwnerOrAdmin(site, user);
 
-    const updated = await this.prisma.site.update({
-      where: { id },
-      data: dto,
-      include: { contractor: { select: CONTRACTOR_SELECT } },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.site.update({
+        where: { id },
+        data: {
+          name: dto.name,
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+          geofenceRadius: dto.geofenceRadius,
+          address: dto.address,
+          constructionPhase: dto.constructionPhase,
+          status: dto.status,
+          developmentType: dto.developmentType,
+          country: dto.country,
+          county: dto.county,
+          constituency: dto.constituency,
+          town: dto.town,
+          plotNumber: dto.plotNumber,
+          landmarks: dto.landmarks,
+          approvals: dto.approvals as unknown as Prisma.InputJsonValue | undefined,
+        },
+      });
+
+      if (dto.personnel) {
+        await tx.sitePersonnel.deleteMany({ where: { siteId: id } });
+        if (dto.personnel.length) {
+          await tx.sitePersonnel.createMany({
+            data: dto.personnel.map((p) => ({
+              siteId: id,
+              role: p.role,
+              userId: p.userId,
+              name: p.name,
+              contact: p.contact,
+            })),
+          });
+        }
+      }
     });
 
-    await this.auditLogService.log(user.userId, 'site.updated', 'Site', id, { ...dto }, ip);
+    await this.auditLogService.log(
+      user.userId,
+      'site.updated',
+      'Site',
+      id,
+      { ...dto } as unknown as Prisma.InputJsonValue,
+      ip,
+    );
 
-    return updated;
+    return this.findSiteOrThrow(id);
   }
 
   async remove(id: string, user: AuthenticatedUser, ip?: string) {
@@ -73,9 +150,25 @@ export class SitesService {
   }
 
   isWithinGeofence(lat: number, lon: number, site: Site): boolean {
-    const radiusMeters = site.geofenceRadius ?? 100;
+    const radiusMeters = site.geofenceRadius ?? 500;
     const distanceMeters = this.haversineDistanceMeters(lat, lon, Number(site.latitude), Number(site.longitude));
     return distanceMeters <= radiusMeters;
+  }
+
+  findWithinRadius(lat: number, lon: number, radiusMeters: number) {
+    return this.prisma.$queryRaw<SiteWithinRadiusRow[]>`
+      SELECT
+        id,
+        name,
+        address,
+        latitude,
+        longitude,
+        "geofenceRadius",
+        ST_Distance(location, ST_SetSRID(ST_MakePoint(${lon}, ${lat}), 4326)::geography) AS "distanceMeters"
+      FROM "Site"
+      WHERE ST_DWithin(location, ST_SetSRID(ST_MakePoint(${lon}, ${lat}), 4326)::geography, ${radiusMeters})
+      ORDER BY "distanceMeters" ASC
+    `;
   }
 
   private haversineDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -116,7 +209,7 @@ export class SitesService {
   private async findSiteOrThrow(id: string) {
     const site = await this.prisma.site.findUnique({
       where: { id },
-      include: { contractor: { select: CONTRACTOR_SELECT } },
+      include: { contractor: { select: CONTRACTOR_SELECT }, ...PERSONNEL_INCLUDE },
     });
     if (!site) {
       throw new NotFoundException('Site not found');
