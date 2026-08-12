@@ -12,6 +12,7 @@ enum AppRole {
   contractor
   site_representative
   administrator
+  developer
 }
 
 enum InspectionRequestStatus {
@@ -35,6 +36,22 @@ enum RiskLevel {
   critical
 }
 
+enum DevelopmentType {
+  RESIDENTIAL
+  COMMERCIAL
+  INDUSTRIAL
+  MIXED_USE
+  INSTITUTIONAL
+}
+
+enum SitePersonnelRole {
+  DEVELOPER
+  SITE_REPRESENTATIVE
+  CONTRACTOR
+  QUANTITY_SURVEYOR
+  ENGINEER
+}
+
 model User {
   id                   String   @id @default(uuid())
   email                String   @unique
@@ -56,6 +73,7 @@ model User {
   requestsAssigned InspectionRequest[] @relation("EngineerRequests")
   inspections      Inspection[]
   auditLogs        AuditLog[]
+  sitePersonnel    SitePersonnel[]
 }
 
 model UserRole {
@@ -78,21 +96,46 @@ model RefreshToken {
 }
 
 model Site {
-  id                String   @id @default(uuid())
+  id                String           @id @default(uuid())
   name              String
   contractorId      String
-  latitude          Decimal  @db.Decimal(10, 8)
-  longitude         Decimal  @db.Decimal(11, 8)
-  geofenceRadius    Int      @default(100)
+  latitude          Decimal          @db.Decimal(10, 8)
+  longitude         Decimal          @db.Decimal(11, 8)
+  location          Unsupported("geography(Point,4326)")?
+  geofenceRadius    Int              @default(500)
   address           String
   constructionPhase String?
-  status            String   @default("active") // active | inactive
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  status            String           @default("active") // active | inactive
+  developmentType   DevelopmentType?
+  country           String?
+  county            String?
+  constituency      String?
+  town              String?
+  plotNumber        String?
+  landmarks         String[]         @default([])
+  approvals         Json?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   contractor  User                @relation("ContractorSites", fields: [contractorId], references: [id])
   requests    InspectionRequest[]
   inspections Inspection[]
+  personnel   SitePersonnel[]
+}
+
+model SitePersonnel {
+  id      String            @id @default(uuid())
+  siteId  String
+  role    SitePersonnelRole
+  userId  String?
+  name    String?
+  contact String?
+
+  site Site  @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([siteId])
+  @@index([userId])
 }
 
 model InspectionRequest {
