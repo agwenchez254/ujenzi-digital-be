@@ -129,11 +129,15 @@ risk to something that already works. The small duplication is accepted.
 
 ## 4. `Inspections` changes
 
-- `findOne`/`update`/`submit` gain the same tie check: administrator, the
-  assigned engineer (`inspection.engineerId === user.userId`), or
+- `findOne` gains a **read** tie check: administrator, the assigned engineer
+  (`inspection.engineerId === user.userId`), or
   `sitesService.isTiedToSite(inspection.siteId, user.userId)` — anyone
   else gets 403. `findOne` needs `@CurrentUser()` added to the controller
-  (it currently takes no user at all).
+  (it currently takes no user at all). `update`/`submit` are **not**
+  broadened — they keep the existing `assertOwnerOrAdmin` (assigned
+  engineer or administrator only). Site-tied developers/contractors get
+  read access to notes and photos, never write access to someone else's
+  inspection.
 - `findAll()`: administrators get every inspection; everyone else gets
   `WHERE siteId IN (resolveTiedSiteIds(user)) OR engineerId = user.userId`
   — an engineer who isn't tied to a site but has an inspection assigned to
