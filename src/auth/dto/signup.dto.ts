@@ -6,6 +6,7 @@ export const SELF_SIGNUP_ROLES: AppRole[] = [
   AppRole.engineer,
   AppRole.contractor,
   AppRole.site_representative,
+  AppRole.developer,
 ];
 
 export class SignupDto {
