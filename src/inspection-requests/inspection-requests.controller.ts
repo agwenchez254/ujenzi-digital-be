@@ -26,8 +26,8 @@ export class InspectionRequestsController {
     return this.inspectionRequestsService.findOne(id, user);
   }
 
-  @ApiOperation({ summary: 'Create an inspection request (contractor for self, or administrator for any contractor)' })
-  @Roles('contractor', 'administrator')
+  @ApiOperation({ summary: 'Create an inspection request (any user tied to the site, or administrator)' })
+  @Roles('contractor', 'developer', 'site_representative', 'administrator')
   @Post()
   create(
     @Body() dto: CreateInspectionRequestDto,
@@ -37,8 +37,8 @@ export class InspectionRequestsController {
     return this.inspectionRequestsService.create(dto, user, ip);
   }
 
-  @ApiOperation({ summary: 'Update an inspection request (owning contractor while pending, or administrator anytime)' })
-  @Roles('contractor', 'administrator')
+  @ApiOperation({ summary: 'Update an inspection request (any user tied to the site while pending, or administrator anytime)' })
+  @Roles('contractor', 'developer', 'site_representative', 'administrator')
   @Patch(':id')
   update(
     @Param('id') id: string,

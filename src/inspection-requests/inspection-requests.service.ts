@@ -1,9 +1,10 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { InspectionRequest } from '@prisma/client';
+import { InspectionRequest, Site } from '@prisma/client';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/types/jwt-payload.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeEventsService } from '../realtime/realtime-events.service';
+import { SitesService } from '../sites/sites.service';
 import { AcceptInspectionRequestDto } from './dto/accept-inspection-request.dto';
 import { CreateInspectionRequestDto } from './dto/create-inspection-request.dto';
 import { UpdateInspectionRequestDto } from './dto/update-inspection-request.dto';
@@ -22,13 +23,19 @@ export class InspectionRequestsService {
     private prisma: PrismaService,
     private auditLogService: AuditLogService,
     private realtimeEventsService: RealtimeEventsService,
+    private sitesService: SitesService,
   ) {}
 
-  findAll(user: AuthenticatedUser) {
-    const canSeeAll = this.canSeeAll(user);
-
+  async findAll(user: AuthenticatedUser) {
+    if (this.canSeeAll(user)) {
+      return this.prisma.inspectionRequest.findMany({
+        include: REQUEST_INCLUDE,
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+    const siteIds = await this.sitesService.resolveTiedSiteIds(user.userId);
     return this.prisma.inspectionRequest.findMany({
-      where: canSeeAll ? undefined : { contractorId: user.userId },
+      where: { siteId: { in: siteIds } },
       include: REQUEST_INCLUDE,
       orderBy: { createdAt: 'desc' },
     });
@@ -36,18 +43,18 @@ export class InspectionRequestsService {
 
   async findOne(id: string, user: AuthenticatedUser) {
     const request = await this.findRequestOrThrow(id);
-    this.assertCanRead(request, user);
+    await this.assertCanRead(request, user);
     return request;
   }
 
   async create(dto: CreateInspectionRequestDto, user: AuthenticatedUser, ip?: string) {
-    const contractorId = this.resolveContractorId(dto.contractorId, user);
-    await this.assertSiteExists(dto.siteId);
+    const site = await this.findSiteOrThrow(dto.siteId);
+    await this.assertTiedOrAdmin(site.id, user);
 
     const request = await this.prisma.inspectionRequest.create({
       data: {
         siteId: dto.siteId,
-        contractorId,
+        contractorId: site.contractorId,
         requestedDate: new Date(dto.requestedDate),
         notes: dto.notes,
       },
@@ -59,7 +66,7 @@ export class InspectionRequestsService {
       'inspection_request.created',
       'InspectionRequest',
       request.id,
-      { siteId: dto.siteId, contractorId },
+      { siteId: dto.siteId, contractorId: site.contractorId },
       ip,
     );
 
@@ -75,16 +82,20 @@ export class InspectionRequestsService {
 
   async update(id: string, dto: UpdateInspectionRequestDto, user: AuthenticatedUser, ip?: string) {
     const request = await this.findRequestOrThrow(id);
-    this.assertCanEdit(request, user);
+    await this.assertCanEdit(request, user);
 
+    let contractorId: string | undefined;
     if (dto.siteId) {
-      await this.assertSiteExists(dto.siteId);
+      const site = await this.findSiteOrThrow(dto.siteId);
+      await this.assertTiedOrAdmin(site.id, user);
+      contractorId = site.contractorId;
     }
 
     const updated = await this.prisma.inspectionRequest.update({
       where: { id },
       data: {
         siteId: dto.siteId,
+        contractorId,
         notes: dto.notes,
         requestedDate: dto.requestedDate ? new Date(dto.requestedDate) : undefined,
       },
@@ -155,23 +166,14 @@ export class InspectionRequestsService {
     return user.roles.includes('engineer') || user.roles.includes('administrator');
   }
 
-  private resolveContractorId(dtoContractorId: string | undefined, user: AuthenticatedUser): string {
-    const isAdmin = user.roles.includes('administrator');
-
-    if (isAdmin) {
-      if (!dtoContractorId) {
-        throw new ForbiddenException(
-          'contractorId is required when an administrator creates an inspection request',
-        );
-      }
-      return dtoContractorId;
+  private async assertTiedOrAdmin(siteId: string, user: AuthenticatedUser) {
+    if (user.roles.includes('administrator')) {
+      return;
     }
-
-    if (dtoContractorId && dtoContractorId !== user.userId) {
-      throw new ForbiddenException('Cannot create an inspection request for another contractor');
+    const tied = await this.sitesService.isTiedToSite(siteId, user.userId);
+    if (!tied) {
+      throw new ForbiddenException('You are not tied to this site');
     }
-
-    return user.userId;
   }
 
   private resolveEngineerId(dto: AcceptInspectionRequestDto, user: AuthenticatedUser): string {
@@ -190,29 +192,33 @@ export class InspectionRequestsService {
     }
   }
 
-  private assertCanRead(request: InspectionRequest, user: AuthenticatedUser) {
-    if (!this.canSeeAll(user) && request.contractorId !== user.userId) {
+  private async assertCanRead(request: InspectionRequest, user: AuthenticatedUser) {
+    if (this.canSeeAll(user)) {
+      return;
+    }
+    if (!(await this.sitesService.isTiedToSite(request.siteId, user.userId))) {
       throw new ForbiddenException('You do not have access to this inspection request');
     }
   }
 
-  private assertCanEdit(request: InspectionRequest, user: AuthenticatedUser) {
+  private async assertCanEdit(request: InspectionRequest, user: AuthenticatedUser) {
     if (user.roles.includes('administrator')) {
       return;
     }
-    if (request.contractorId !== user.userId) {
-      throw new ForbiddenException('You do not own this inspection request');
+    if (!(await this.sitesService.isTiedToSite(request.siteId, user.userId))) {
+      throw new ForbiddenException('You do not have access to this inspection request');
     }
     if (request.status !== 'pending') {
       throw new ForbiddenException('This request can no longer be edited');
     }
   }
 
-  private async assertSiteExists(siteId: string) {
+  private async findSiteOrThrow(siteId: string): Promise<Site> {
     const site = await this.prisma.site.findUnique({ where: { id: siteId } });
     if (!site) {
       throw new NotFoundException('Site not found');
     }
+    return site;
   }
 
   private async findRequestOrThrow(id: string) {

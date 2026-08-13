@@ -6,14 +6,6 @@ export class CreateInspectionRequestDto {
   @IsUUID()
   siteId: string;
 
-  @ApiPropertyOptional({
-    description:
-      'Administrator only — the contractor to create this request for. Ignored/forbidden for contractor callers, who always create for themselves.',
-  })
-  @IsOptional()
-  @IsUUID()
-  contractorId?: string;
-
   @ApiProperty({ example: '2026-08-10' })
   @IsDateString()
   requestedDate: string;
