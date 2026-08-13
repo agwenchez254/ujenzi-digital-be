@@ -29,7 +29,7 @@ export class PushSubscriptionsController {
   @ApiOperation({ summary: 'Remove a push subscription (e.g. on logout)' })
   @ApiBearerAuth()
   @Delete('subscribe')
-  unsubscribe(@Body() dto: UnsubscribePushDto) {
-    return this.pushSubscriptionsService.unsubscribe(dto);
+  unsubscribe(@Body() dto: UnsubscribePushDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.pushSubscriptionsService.unsubscribe(user.userId, dto);
   }
 }

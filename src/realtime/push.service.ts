@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PushSubscription } from '@prisma/client';
 import * as webpush from 'web-push';
 import { PrismaService } from '../prisma/prisma.service';
+import { isAllowedPushEndpoint } from './push-endpoint-allowlist';
 
 export interface PushContent {
   title: string;
@@ -22,6 +23,13 @@ export class PushService {
   }
 
   async send(subscription: PushSubscription, content: PushContent): Promise<void> {
+    // Defense-in-depth: re-validate even though SubscribePushDto already checks this at
+    // subscribe time, in case a row was ever created through another path.
+    if (!isAllowedPushEndpoint(subscription.endpoint)) {
+      this.logger.warn(`Refusing to send push to disallowed endpoint host for subscription ${subscription.id}`);
+      return;
+    }
+
     try {
       await webpush.sendNotification(
         { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
