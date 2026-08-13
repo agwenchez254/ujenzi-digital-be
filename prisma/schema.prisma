@@ -242,3 +242,11 @@ model AuditLog {
 
   user User? @relation(fields: [userId], references: [id])
 }
+
+model RolePermission {
+  id         String  @id @default(uuid())
+  role       AppRole
+  permission String
+
+  @@unique([role, permission])
+}
