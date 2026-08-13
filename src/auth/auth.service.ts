@@ -6,6 +6,7 @@ import * as bcrypt from 'bcrypt';
 import { createHash, randomUUID } from 'crypto';
 import { Response } from 'express';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { PermissionsService } from '../permissions/permissions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
 import { SignupDto } from './dto/signup.dto';
@@ -28,6 +29,7 @@ export class AuthService {
     private jwtService: JwtService,
     private configService: ConfigService,
     private auditLogService: AuditLogService,
+    private permissionsService: PermissionsService,
   ) {}
 
   async signup(dto: SignupDto, res: Response, ip?: string): Promise<AuthResult> {
@@ -183,9 +185,10 @@ export class AuthService {
       this.prisma.user.findUniqueOrThrow({ where: { id: userId } }),
       this.getRoles(userId),
     ]);
+    const permissions = await this.permissionsService.resolvePermissionsForRoles(roles);
 
     const accessToken = await this.jwtService.signAsync(
-      { sub: userId, roles },
+      { sub: userId, roles, permissions },
       {
         secret: this.configService.get<string>('JWT_ACCESS_SECRET'),
         expiresIn: ACCESS_TOKEN_TTL,
@@ -220,7 +223,7 @@ export class AuthService {
 
     return {
       accessToken,
-      user: { ...safeUser, roles },
+      user: { ...safeUser, roles, permissions },
       needsRoleSelection: roles.length === 0,
     };
   }
