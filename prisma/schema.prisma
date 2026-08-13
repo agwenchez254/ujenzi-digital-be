@@ -73,7 +73,8 @@ model User {
   requestsAssigned InspectionRequest[] @relation("EngineerRequests")
   inspections      Inspection[]
   auditLogs        AuditLog[]
-  sitePersonnel    SitePersonnel[]
+  sitePersonnel     SitePersonnel[]
+  pushSubscriptions PushSubscription[]
 }
 
 model UserRole {
@@ -135,6 +136,19 @@ model SitePersonnel {
   user User? @relation(fields: [userId], references: [id])
 
   @@index([siteId])
+  @@index([userId])
+}
+
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId])
 }
 
