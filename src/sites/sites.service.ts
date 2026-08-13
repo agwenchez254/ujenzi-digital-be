@@ -171,6 +171,29 @@ export class SitesService {
     `;
   }
 
+  async isTiedToSite(siteId: string, userId: string): Promise<boolean> {
+    const site = await this.prisma.site.findUnique({ where: { id: siteId }, select: { contractorId: true } });
+    if (!site) {
+      return false;
+    }
+    if (site.contractorId === userId) {
+      return true;
+    }
+    const personnel = await this.prisma.sitePersonnel.findFirst({ where: { siteId, userId } });
+    return !!personnel;
+  }
+
+  async resolveTiedSiteIds(userId: string): Promise<string[]> {
+    const [personnelSites, ownedSites] = await Promise.all([
+      this.prisma.sitePersonnel.findMany({ where: { userId }, select: { siteId: true } }),
+      this.prisma.site.findMany({ where: { contractorId: userId }, select: { id: true } }),
+    ]);
+    const ids = new Set<string>();
+    personnelSites.forEach((p) => ids.add(p.siteId));
+    ownedSites.forEach((s) => ids.add(s.id));
+    return [...ids];
+  }
+
   private haversineDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const toRad = (deg: number) => (deg * Math.PI) / 180;
 
