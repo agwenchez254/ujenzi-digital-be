@@ -3,6 +3,7 @@ import { Inspection, Prisma, Site } from '@prisma/client';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/types/jwt-payload.type';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeEventsService } from '../realtime/realtime-events.service';
 import { SitesService } from '../sites/sites.service';
 import { CreateInspectionDto } from './dto/create-inspection.dto';
 import { SubmitInspectionDto } from './dto/submit-inspection.dto';
@@ -19,6 +20,7 @@ export class InspectionsService {
     private prisma: PrismaService,
     private sitesService: SitesService,
     private auditLogService: AuditLogService,
+    private realtimeEventsService: RealtimeEventsService,
   ) {}
 
   findAll() {
@@ -73,6 +75,13 @@ export class InspectionsService {
       inspection.id,
       { requestId: request.id },
       ip,
+    );
+
+    await this.realtimeEventsService.emit(
+      'inspection.started',
+      inspection,
+      { siteIds: [inspection.siteId] },
+      { title: 'Inspection started', body: inspection.site.name },
     );
 
     return inspection;
@@ -147,6 +156,13 @@ export class InspectionsService {
       id,
       { ...dto } as unknown as Prisma.InputJsonValue,
       ip,
+    );
+
+    await this.realtimeEventsService.emit(
+      'inspection.submitted',
+      updated,
+      { siteIds: [updated.siteId] },
+      { title: 'Inspection submitted', body: updated.site.name },
     );
 
     return updated;

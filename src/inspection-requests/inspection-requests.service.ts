@@ -3,6 +3,7 @@ import { InspectionRequest } from '@prisma/client';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/types/jwt-payload.type';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeEventsService } from '../realtime/realtime-events.service';
 import { AcceptInspectionRequestDto } from './dto/accept-inspection-request.dto';
 import { CreateInspectionRequestDto } from './dto/create-inspection-request.dto';
 import { UpdateInspectionRequestDto } from './dto/update-inspection-request.dto';
@@ -20,6 +21,7 @@ export class InspectionRequestsService {
   constructor(
     private prisma: PrismaService,
     private auditLogService: AuditLogService,
+    private realtimeEventsService: RealtimeEventsService,
   ) {}
 
   findAll(user: AuthenticatedUser) {
@@ -59,6 +61,13 @@ export class InspectionRequestsService {
       request.id,
       { siteId: dto.siteId, contractorId },
       ip,
+    );
+
+    await this.realtimeEventsService.emit(
+      'inspection-request.created',
+      request,
+      { siteIds: [request.siteId], roles: ['engineer', 'administrator'] },
+      { title: 'New inspection request', body: `${request.site.name} — requested by ${request.contractor.name}` },
     );
 
     return request;
@@ -107,6 +116,16 @@ export class InspectionRequestsService {
       ip,
     );
 
+    await this.realtimeEventsService.emit(
+      'inspection-request.accepted',
+      updated,
+      { siteIds: [updated.siteId] },
+      {
+        title: 'Inspection request accepted',
+        body: `${updated.site.name} — accepted by ${updated.engineer?.name ?? 'an engineer'}`,
+      },
+    );
+
     return updated;
   }
 
@@ -121,6 +140,13 @@ export class InspectionRequestsService {
     });
 
     await this.auditLogService.log(user.userId, 'inspection_request.rejected', 'InspectionRequest', id, undefined, ip);
+
+    await this.realtimeEventsService.emit(
+      'inspection-request.rejected',
+      updated,
+      { siteIds: [updated.siteId] },
+      { title: 'Inspection request rejected', body: updated.site.name },
+    );
 
     return updated;
   }
