@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Site } from '@prisma/client';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/types/jwt-payload.type';
@@ -43,7 +43,7 @@ export class SitesService {
   }
 
   async create(dto: CreateSiteDto, user: AuthenticatedUser, ip?: string) {
-    const contractorId = this.resolveContractorId(dto.contractorId, user);
+    const contractorId = this.resolveContractorId(dto, user);
 
     const created = await this.prisma.$transaction(async (tx) => {
       const site = await tx.site.create({
@@ -61,6 +61,7 @@ export class SitesService {
           constituency: dto.constituency,
           town: dto.town,
           plotNumber: dto.plotNumber,
+          expectedEndDate: dto.expectedEndDate ? new Date(dto.expectedEndDate) : undefined,
           landmarks: dto.landmarks,
           approvals: dto.approvals as unknown as Prisma.InputJsonValue | undefined,
         },
@@ -88,7 +89,7 @@ export class SitesService {
 
   async update(id: string, dto: UpdateSiteDto, user: AuthenticatedUser, ip?: string) {
     const site = await this.findSiteOrThrow(id);
-    this.assertOwnerOrAdmin(site, user);
+    await this.assertOwnerOrAdmin(site, user);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.site.update({
@@ -107,6 +108,7 @@ export class SitesService {
           constituency: dto.constituency,
           town: dto.town,
           plotNumber: dto.plotNumber,
+          expectedEndDate: dto.expectedEndDate ? new Date(dto.expectedEndDate) : undefined,
           landmarks: dto.landmarks,
           approvals: dto.approvals as unknown as Prisma.InputJsonValue | undefined,
         },
@@ -142,7 +144,7 @@ export class SitesService {
 
   async remove(id: string, user: AuthenticatedUser, ip?: string) {
     const site = await this.findSiteOrThrow(id);
-    this.assertOwnerOrAdmin(site, user);
+    await this.assertOwnerOrAdmin(site, user);
 
     await this.prisma.site.delete({ where: { id } });
 
@@ -206,25 +208,38 @@ export class SitesService {
     return EARTH_RADIUS_METERS * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
-  private resolveContractorId(dtoContractorId: string | undefined, user: AuthenticatedUser): string {
-    const isAdmin = user.roles.includes('administrator');
-
-    if (isAdmin) {
-      if (!dtoContractorId) {
+  private resolveContractorId(dto: CreateSiteDto, user: AuthenticatedUser): string {
+    if (user.roles.includes('administrator')) {
+      if (!dto.contractorId) {
         throw new ForbiddenException('contractorId is required when an administrator creates a site');
       }
-      return dtoContractorId;
+      return dto.contractorId;
     }
 
-    if (dtoContractorId && dtoContractorId !== user.userId) {
-      throw new ForbiddenException('Cannot create a site for another contractor');
+    if (user.roles.includes('contractor')) {
+      if (dto.contractorId && dto.contractorId !== user.userId) {
+        throw new ForbiddenException('Cannot create a site for another contractor');
+      }
+      return user.userId;
     }
 
-    return user.userId;
+    const contractorEntry = dto.personnel?.find((p) => p.role === 'CONTRACTOR' && p.userId);
+    if (!contractorEntry?.userId) {
+      throw new BadRequestException(
+        'A contractor must be assigned via personnel (with a linked account) when registering a site as a developer',
+      );
+    }
+    return contractorEntry.userId;
   }
 
-  private assertOwnerOrAdmin(site: Site, user: AuthenticatedUser) {
-    if (site.contractorId !== user.userId && !user.roles.includes('administrator')) {
+  private async assertOwnerOrAdmin(site: Site, user: AuthenticatedUser) {
+    if (site.contractorId === user.userId || user.roles.includes('administrator')) {
+      return;
+    }
+    const isLinkedDeveloper = await this.prisma.sitePersonnel.findFirst({
+      where: { siteId: site.id, userId: user.userId, role: 'DEVELOPER' },
+    });
+    if (!isLinkedDeveloper) {
       throw new ForbiddenException('You do not own this site');
     }
   }

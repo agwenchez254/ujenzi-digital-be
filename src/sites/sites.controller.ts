@@ -25,15 +25,15 @@ export class SitesController {
     return this.sitesService.findOne(id);
   }
 
-  @ApiOperation({ summary: 'Create a site (contractor for self, or administrator for any contractor)' })
-  @Roles('contractor', 'administrator')
+  @ApiOperation({ summary: 'Create a site (contractor for self, developer via a linked contractor in personnel, or administrator for any contractor)' })
+  @Roles('contractor', 'developer', 'administrator')
   @Post()
   create(@Body() dto: CreateSiteDto, @CurrentUser() user: AuthenticatedUser, @Ip() ip: string) {
     return this.sitesService.create(dto, user, ip);
   }
 
-  @ApiOperation({ summary: 'Update a site (owning contractor or administrator)' })
-  @Roles('contractor', 'administrator')
+  @ApiOperation({ summary: 'Update a site (owning contractor, a linked developer, or administrator)' })
+  @Roles('contractor', 'developer', 'administrator')
   @Patch(':id')
   update(
     @Param('id') id: string,
