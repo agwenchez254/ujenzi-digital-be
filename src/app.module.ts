@@ -10,6 +10,7 @@ import { CommonModule } from './common/common.module';
 import { CsrfMiddleware } from './common/csrf/csrf.middleware';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { ContractorInvitationsModule } from './contractor-invitations/contractor-invitations.module';
 import { InspectionRequestsModule } from './inspection-requests/inspection-requests.module';
 import { InspectionsModule } from './inspections/inspections.module';
 import { MailModule } from './mail/mail.module';
@@ -28,6 +29,7 @@ import { UsersModule } from './users/users.module';
     CommonModule,
     AuditLogModule,
     AuthModule,
+    ContractorInvitationsModule,
     InspectionRequestsModule,
     InspectionsModule,
     MailModule,
