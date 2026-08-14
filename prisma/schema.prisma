@@ -75,6 +75,8 @@ model User {
   auditLogs        AuditLog[]
   sitePersonnel     SitePersonnel[]
   pushSubscriptions PushSubscription[]
+  contractorInvitationsReceived ContractorInvitation[] @relation("InvitedContractor")
+  contractorInvitationsSent     ContractorInvitation[] @relation("InvitingDeveloper")
 }
 
 model UserRole {
@@ -123,6 +125,7 @@ model Site {
   requests    InspectionRequest[]
   inspections Inspection[]
   personnel   SitePersonnel[]
+  invitation  ContractorInvitation?
 }
 
 model SitePersonnel {
@@ -138,6 +141,24 @@ model SitePersonnel {
 
   @@index([siteId])
   @@index([userId])
+}
+
+model ContractorInvitation {
+  id            String    @id @default(uuid())
+  siteId        String    @unique
+  invitedUserId String
+  invitedById   String
+  tokenHash     String
+  expiresAt     DateTime
+  acceptedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  site      Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  invited   User @relation("InvitedContractor", fields: [invitedUserId], references: [id])
+  invitedBy User @relation("InvitingDeveloper", fields: [invitedById], references: [id])
+
+  @@index([invitedUserId])
 }
 
 model PushSubscription {
