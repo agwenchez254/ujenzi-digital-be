@@ -76,6 +76,36 @@ export class UsersService {
     return this.toSafeUser(await this.findUserOrThrow(targetUserId));
   }
 
+  async updateProfileAsAdmin(
+    targetUserId: string,
+    dto: UpdateProfileDto,
+    adminUserId: string,
+    ip?: string,
+  ) {
+    await this.findUserOrThrow(targetUserId);
+
+    const user = await this.prisma.user.update({
+      where: { id: targetUserId },
+      data: dto,
+      include: { roles: true },
+    });
+
+    await this.auditLogService.log(adminUserId, 'user.profile_updated', 'User', targetUserId, { ...dto }, ip);
+
+    return this.toSafeUser(user);
+  }
+
+  async lookupByEmail(email: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true, name: true },
+    });
+    if (!user) {
+      throw new NotFoundException('No user found with that email');
+    }
+    return user;
+  }
+
   private async findUserOrThrow(userId: string): Promise<UserWithRoles> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },

@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Ip, Param, Patch } from '@nestjs/common';
+import { Body, Controller, Get, Ip, Param, Patch, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '../auth/types/jwt-payload.type';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
+import { LookupUserDto } from './dto/lookup-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateRolesDto } from './dto/update-roles.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
@@ -24,6 +25,12 @@ export class UsersController {
   @Patch('me')
   updateSelf(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateProfileDto) {
     return this.usersService.updateSelf(user.userId, dto);
+  }
+
+  @ApiOperation({ summary: 'Look up a user by email (any authenticated user) — for linking site personnel' })
+  @Get('lookup')
+  lookup(@Query() query: LookupUserDto) {
+    return this.usersService.lookupByEmail(query.email);
   }
 
   @ApiOperation({ summary: 'List all users (administrator only)' })
@@ -55,5 +62,17 @@ export class UsersController {
     @Ip() ip: string,
   ) {
     return this.usersService.updateRoles(id, dto, admin.userId, ip);
+  }
+
+  @ApiOperation({ summary: "Update another user's profile fields (administrator only)" })
+  @Roles('administrator')
+  @Patch(':id')
+  updateUser(
+    @Param('id') id: string,
+    @Body() dto: UpdateProfileDto,
+    @CurrentUser() admin: AuthenticatedUser,
+    @Ip() ip: string,
+  ) {
+    return this.usersService.updateProfileAsAdmin(id, dto, admin.userId, ip);
   }
 }
