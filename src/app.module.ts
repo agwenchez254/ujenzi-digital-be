@@ -12,6 +12,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { InspectionRequestsModule } from './inspection-requests/inspection-requests.module';
 import { InspectionsModule } from './inspections/inspections.module';
+import { MailModule } from './mail/mail.module';
 import { MediaModule } from './media/media.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -29,6 +30,7 @@ import { UsersModule } from './users/users.module';
     AuthModule,
     InspectionRequestsModule,
     InspectionsModule,
+    MailModule,
     MediaModule,
     PermissionsModule,
     RealtimeModule,
