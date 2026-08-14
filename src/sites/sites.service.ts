@@ -2,6 +2,8 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { Prisma, Site } from '@prisma/client';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/types/jwt-payload.type';
+import { generateToken, hashToken } from '../common/utils/token.util';
+import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSiteDto } from './dto/create-site.dto';
 import { UpdateSiteDto } from './dto/update-site.dto';
@@ -13,6 +15,7 @@ const PERSONNEL_INCLUDE = {
   },
 } as const;
 const EARTH_RADIUS_METERS = 6_371_000;
+const CONTRACTOR_INVITATION_TTL_MS = 48 * 60 * 60 * 1000;
 
 export interface SiteWithinRadiusRow {
   id: string;
@@ -29,6 +32,7 @@ export class SitesService {
   constructor(
     private prisma: PrismaService,
     private auditLogService: AuditLogService,
+    private mailService: MailService,
   ) {}
 
   findAll() {
@@ -43,7 +47,8 @@ export class SitesService {
   }
 
   async create(dto: CreateSiteDto, user: AuthenticatedUser, ip?: string) {
-    const contractorId = await this.resolveContractorId(dto, user);
+    const { contractorId, pendingContractor } = await this.resolveContractorId(dto, user);
+    const invitationToken = pendingContractor ? generateToken() : undefined;
 
     const created = await this.prisma.$transaction(async (tx) => {
       const site = await tx.site.create({
@@ -79,10 +84,46 @@ export class SitesService {
         });
       }
 
+      if (pendingContractor && invitationToken) {
+        await tx.contractorInvitation.create({
+          data: {
+            siteId: site.id,
+            invitedUserId: pendingContractor.userId,
+            invitedById: user.userId,
+            tokenHash: hashToken(invitationToken),
+            expiresAt: new Date(Date.now() + CONTRACTOR_INVITATION_TTL_MS),
+          },
+        });
+      }
+
       return site;
     });
 
     await this.auditLogService.log(user.userId, 'site.created', 'Site', created.id, { contractorId }, ip);
+
+    if (pendingContractor && invitationToken) {
+      await this.auditLogService.log(
+        user.userId,
+        'site.contractor_invited',
+        'Site',
+        created.id,
+        { invitedUserId: pendingContractor.userId },
+        ip,
+      );
+      const developer = await this.prisma.user.findUnique({ where: { id: user.userId }, select: { name: true } });
+      this.mailService
+        .sendContractorInvitation({
+          to: pendingContractor.email,
+          contractorName: pendingContractor.name,
+          siteName: dto.name,
+          developerName: developer?.name ?? 'A developer',
+          token: invitationToken,
+          isResend: false,
+        })
+        .catch((err) => {
+          console.error('Failed to send contractor invitation email', err);
+        });
+    }
 
     return this.findSiteOrThrow(created.id);
   }
@@ -208,19 +249,22 @@ export class SitesService {
     return EARTH_RADIUS_METERS * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
-  private async resolveContractorId(dto: CreateSiteDto, user: AuthenticatedUser): Promise<string> {
+  private async resolveContractorId(
+    dto: CreateSiteDto,
+    user: AuthenticatedUser,
+  ): Promise<{ contractorId: string; pendingContractor?: { userId: string; email: string; name: string } }> {
     if (user.roles.includes('administrator')) {
       if (!dto.contractorId) {
         throw new ForbiddenException('contractorId is required when an administrator creates a site');
       }
-      return dto.contractorId;
+      return { contractorId: dto.contractorId };
     }
 
     if (user.roles.includes('contractor')) {
       if (dto.contractorId && dto.contractorId !== user.userId) {
         throw new ForbiddenException('Cannot create a site for another contractor');
       }
-      return user.userId;
+      return { contractorId: user.userId };
     }
 
     const contractorEntry = dto.personnel?.find((p) => p.role === 'CONTRACTOR' && p.userId);
@@ -229,13 +273,18 @@ export class SitesService {
         'A contractor must be assigned via personnel (with a linked account) when registering a site as a developer',
       );
     }
-    const linkedUserHasContractorRole = await this.prisma.userRole.findFirst({
-      where: { userId: contractorEntry.userId, role: 'contractor' },
+    const invitedUser = await this.prisma.user.findFirst({
+      where: { id: contractorEntry.userId, roles: { some: { role: 'contractor' } } },
+      select: { id: true, email: true, name: true },
     });
-    if (!linkedUserHasContractorRole) {
+    if (!invitedUser) {
       throw new BadRequestException('The linked personnel account must have the contractor role');
     }
-    return contractorEntry.userId;
+
+    return {
+      contractorId: user.userId,
+      pendingContractor: { userId: invitedUser.id, email: invitedUser.email, name: invitedUser.name },
+    };
   }
 
   private async assertOwnerOrAdmin(site: Site, user: AuthenticatedUser) {
