@@ -43,7 +43,7 @@ export class SitesService {
   }
 
   async create(dto: CreateSiteDto, user: AuthenticatedUser, ip?: string) {
-    const contractorId = this.resolveContractorId(dto, user);
+    const contractorId = await this.resolveContractorId(dto, user);
 
     const created = await this.prisma.$transaction(async (tx) => {
       const site = await tx.site.create({
@@ -208,7 +208,7 @@ export class SitesService {
     return EARTH_RADIUS_METERS * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
-  private resolveContractorId(dto: CreateSiteDto, user: AuthenticatedUser): string {
+  private async resolveContractorId(dto: CreateSiteDto, user: AuthenticatedUser): Promise<string> {
     if (user.roles.includes('administrator')) {
       if (!dto.contractorId) {
         throw new ForbiddenException('contractorId is required when an administrator creates a site');
@@ -228,6 +228,12 @@ export class SitesService {
       throw new BadRequestException(
         'A contractor must be assigned via personnel (with a linked account) when registering a site as a developer',
       );
+    }
+    const linkedUserHasContractorRole = await this.prisma.userRole.findFirst({
+      where: { userId: contractorEntry.userId, role: 'contractor' },
+    });
+    if (!linkedUserHasContractorRole) {
+      throw new BadRequestException('The linked personnel account must have the contractor role');
     }
     return contractorEntry.userId;
   }
