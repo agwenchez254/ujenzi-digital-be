@@ -113,6 +113,7 @@ model Site {
   constituency      String?
   town              String?
   plotNumber        String?
+  expectedEndDate   DateTime?
   landmarks         String[]         @default([])
   approvals         Json?
   createdAt         DateTime         @default(now())

@@ -3,6 +3,7 @@ import { DevelopmentType } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsDateString,
   IsEnum,
   IsInt,
   IsLatitude,
@@ -87,6 +88,11 @@ export class CreateSiteDto {
   @IsOptional()
   @IsString()
   plotNumber?: string;
+
+  @ApiPropertyOptional({ example: '2027-06-30' })
+  @IsOptional()
+  @IsDateString()
+  expectedEndDate?: string;
 
   @ApiPropertyOptional({ type: [String], example: ['Near Sarit Centre'] })
   @IsOptional()
