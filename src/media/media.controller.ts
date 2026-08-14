@@ -37,10 +37,10 @@ const CONTENT_TYPES: Record<string, string> = {
 export class MediaController {
   constructor(private mediaService: MediaService) {}
 
-  @ApiOperation({ summary: 'List all media for an inspection' })
+  @ApiOperation({ summary: 'List all media for an inspection (tied users, the assigned engineer, or an administrator)' })
   @Get('inspections/:inspectionId/media')
-  findAllForInspection(@Param('inspectionId') inspectionId: string) {
-    return this.mediaService.findAllForInspection(inspectionId);
+  findAllForInspection(@Param('inspectionId') inspectionId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.mediaService.findAllForInspection(inspectionId, user);
   }
 
   @ApiOperation({ summary: 'Upload a photo or video to an in-progress inspection (owning engineer or administrator)' })
@@ -81,10 +81,10 @@ export class MediaController {
     return this.mediaService.upload(inspectionId, file, dto, user, ip);
   }
 
-  @ApiOperation({ summary: 'Stream a media file' })
+  @ApiOperation({ summary: 'Stream a media file (tied users, the assigned engineer, or an administrator)' })
   @Get('media/:id/file')
-  async getFile(@Param('id') id: string, @Res() res: Response) {
-    const { stream, extension } = await this.mediaService.getFileStream(id);
+  async getFile(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser, @Res() res: Response) {
+    const { stream, extension } = await this.mediaService.getFileStream(id, user);
     res.set('Content-Type', CONTENT_TYPES[extension] ?? 'application/octet-stream');
     stream.on('error', () => {
       if (!res.headersSent) {

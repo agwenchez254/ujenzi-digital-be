@@ -4,6 +4,7 @@ import * as path from 'path';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/types/jwt-payload.type';
 import { PrismaService } from '../prisma/prisma.service';
+import { SitesService } from '../sites/sites.service';
 import { StorageService } from '../storage/storage.service';
 import { UploadMediaDto } from './dto/upload-media.dto';
 
@@ -15,9 +16,16 @@ export class MediaService {
     private prisma: PrismaService,
     private storageService: StorageService,
     private auditLogService: AuditLogService,
+    private sitesService: SitesService,
   ) {}
 
-  findAllForInspection(inspectionId: string) {
+  async findAllForInspection(inspectionId: string, user: AuthenticatedUser) {
+    const inspection = await this.prisma.inspection.findUnique({ where: { id: inspectionId } });
+    if (!inspection) {
+      throw new NotFoundException('Inspection not found');
+    }
+    await this.assertCanView(inspection.siteId, inspection.engineerId, user);
+
     return this.prisma.media.findMany({
       where: { inspectionId },
       orderBy: { createdAt: 'desc' },
@@ -61,8 +69,11 @@ export class MediaService {
     return media;
   }
 
-  async getFileStream(id: string) {
+  async getFileStream(id: string, user: AuthenticatedUser) {
     const media = await this.findMediaOrThrow(id);
+    const inspection = await this.prisma.inspection.findUniqueOrThrow({ where: { id: media.inspectionId } });
+    await this.assertCanView(inspection.siteId, inspection.engineerId, user);
+
     return { stream: this.storageService.read(media.url), extension: path.extname(media.url) };
   }
 
@@ -87,6 +98,18 @@ export class MediaService {
   private assertOwnerOrAdmin(engineerId: string, user: AuthenticatedUser) {
     if (engineerId !== user.userId && !user.roles.includes('administrator')) {
       throw new ForbiddenException('You do not own this inspection');
+    }
+  }
+
+  private async assertCanView(siteId: string, engineerId: string, user: AuthenticatedUser) {
+    if (user.roles.includes('administrator')) {
+      return;
+    }
+    if (engineerId === user.userId) {
+      return;
+    }
+    if (!(await this.sitesService.isTiedToSite(siteId, user.userId))) {
+      throw new ForbiddenException('You do not have access to this inspection');
     }
   }
 
