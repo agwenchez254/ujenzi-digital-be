@@ -23,15 +23,25 @@ export class InspectionsService {
     private realtimeEventsService: RealtimeEventsService,
   ) {}
 
-  findAll() {
+  async findAll(user: AuthenticatedUser) {
+    if (user.roles.includes('administrator')) {
+      return this.prisma.inspection.findMany({
+        include: INSPECTION_INCLUDE,
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+    const siteIds = await this.sitesService.resolveTiedSiteIds(user.userId);
     return this.prisma.inspection.findMany({
+      where: { OR: [{ siteId: { in: siteIds } }, { engineerId: user.userId }] },
       include: INSPECTION_INCLUDE,
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  findOne(id: string) {
-    return this.findInspectionOrThrow(id);
+  async findOne(id: string, user: AuthenticatedUser) {
+    const inspection = await this.findInspectionOrThrow(id);
+    await this.assertCanView(inspection, user);
+    return inspection;
   }
 
   async create(dto: CreateInspectionDto, user: AuthenticatedUser, ip?: string) {
@@ -95,11 +105,8 @@ export class InspectionsService {
     const updated = await this.prisma.inspection.update({
       where: { id },
       data: {
-        notes: dto.notes,
-        observations: dto.observations,
-        recommendations: dto.recommendations,
+        notes: dto.notes as unknown as Prisma.InputJsonValue | undefined,
         riskLevel: dto.riskLevel,
-        checklistResponses: dto.checklistResponses as unknown as Prisma.InputJsonValue | undefined,
       },
       include: INSPECTION_INCLUDE,
     });
@@ -131,11 +138,8 @@ export class InspectionsService {
       this.prisma.inspection.update({
         where: { id },
         data: {
-          notes: dto.notes,
-          observations: dto.observations,
-          recommendations: dto.recommendations,
+          notes: dto.notes as unknown as Prisma.InputJsonValue | undefined,
           riskLevel: dto.riskLevel,
-          checklistResponses: dto.checklistResponses as unknown as Prisma.InputJsonValue | undefined,
           latitude: dto.latitude,
           longitude: dto.longitude,
           endTime: new Date(),
@@ -180,6 +184,18 @@ export class InspectionsService {
   private assertOwnerOrAdmin(inspection: Inspection, user: AuthenticatedUser) {
     if (inspection.engineerId !== user.userId && !user.roles.includes('administrator')) {
       throw new ForbiddenException('You do not own this inspection');
+    }
+  }
+
+  private async assertCanView(inspection: Inspection, user: AuthenticatedUser) {
+    if (user.roles.includes('administrator')) {
+      return;
+    }
+    if (inspection.engineerId === user.userId) {
+      return;
+    }
+    if (!(await this.sitesService.isTiedToSite(inspection.siteId, user.userId))) {
+      throw new ForbiddenException('You do not have access to this inspection');
     }
   }
 

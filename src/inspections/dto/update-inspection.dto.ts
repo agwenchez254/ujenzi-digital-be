@@ -1,37 +1,15 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { RiskLevel } from '@prisma/client';
-import { Type } from 'class-transformer';
-import { IsArray, IsEnum, IsOptional, IsString, ValidateNested } from 'class-validator';
-import { ChecklistResponseItemDto } from './checklist-response-item.dto';
+import { IsEnum, IsObject, IsOptional } from 'class-validator';
 
 export class UpdateInspectionDto {
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Tiptap/ProseMirror JSON document.' })
   @IsOptional()
-  @IsString()
-  notes?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  observations?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  recommendations?: string;
+  @IsObject()
+  notes?: Record<string, unknown>;
 
   @ApiPropertyOptional({ enum: RiskLevel })
   @IsOptional()
   @IsEnum(RiskLevel)
   riskLevel?: RiskLevel;
-
-  @ApiPropertyOptional({
-    type: [ChecklistResponseItemDto],
-    description: 'Replaces the entire checklist array — there is no item-level merge.',
-  })
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => ChecklistResponseItemDto)
-  checklistResponses?: ChecklistResponseItemDto[];
 }

@@ -14,16 +14,16 @@ import { InspectionsService } from './inspections.service';
 export class InspectionsController {
   constructor(private inspectionsService: InspectionsService) {}
 
-  @ApiOperation({ summary: 'List all inspections' })
+  @ApiOperation({ summary: "List inspections (tied users see their sites' inspections; administrators see all)" })
   @Get()
-  findAll() {
-    return this.inspectionsService.findAll();
+  findAll(@CurrentUser() user: AuthenticatedUser) {
+    return this.inspectionsService.findAll(user);
   }
 
-  @ApiOperation({ summary: 'Get an inspection by id' })
+  @ApiOperation({ summary: 'Get an inspection by id (tied users, the assigned engineer, or an administrator)' })
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.inspectionsService.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.inspectionsService.findOne(id, user);
   }
 
   @ApiOperation({ summary: 'Start an inspection from an accepted request (assigned engineer or administrator)' })
