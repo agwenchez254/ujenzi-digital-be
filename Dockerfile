@@ -1,7 +1,7 @@
 # ----------------------------------------------------
 # Stage 1: Build Stage
 # ----------------------------------------------------
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 
 # Install build dependencies for native packages (bcrypt, prisma)
 RUN apk add --no-cache python3 make g++ openssl libc6-compat
@@ -33,7 +33,7 @@ RUN pnpm prune --prod
 # ----------------------------------------------------
 # Stage 2: Production Runner Stage
 # ----------------------------------------------------
-FROM node:20-alpine AS runner
+FROM node:24-alpine AS runner
 
 # Install runtime dependencies for Prisma and OpenSSL
 RUN apk add --no-cache openssl libc6-compat

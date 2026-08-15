@@ -67,7 +67,9 @@ export class PublicSitesController {
     const mapImageUrl =
       `https://api.mapbox.com/styles/v1/mapbox/streets-v11/static/` +
       `pin-s+f00(${lon},${lat})/${lon},${lat},14/600x315?access_token=${mapboxToken}`;
-    const pageUrl = `${this.configService.get<string>('FRONTEND_ORIGIN')}/public/sites/${id}`;
+    const rawOrigin = this.configService.get<string>('FRONTEND_ORIGIN') || 'http://localhost:8080';
+    const primaryOrigin = rawOrigin.split(',')[0].trim();
+    const pageUrl = `${primaryOrigin}/public/sites/${id}`;
 
     // Scoped to just this response — the rest of the API stays on the
     // stricter global CSP set in main.ts. Mapbox GL needs script/connect

@@ -23,9 +23,43 @@ async function bootstrap() {
   );
   app.use(cookieParser());
 
+  const rawOrigins = configService.get<string>('FRONTEND_ORIGIN');
+  const allowedOrigins = rawOrigins
+    ? rawOrigins
+        .split(',')
+        .map((o) => o.trim())
+        .filter(Boolean)
+    : [
+        'http://localhost:8080',
+        'http://localhost:5173',
+        'http://localhost:3000',
+      ];
+
+  // Always allow localhost:8080 and localhost:5173 for local development
+  if (!allowedOrigins.includes('http://localhost:8080')) {
+    allowedOrigins.push('http://localhost:8080');
+  }
+  if (!allowedOrigins.includes('http://localhost:5173')) {
+    allowedOrigins.push('http://localhost:5173');
+  }
+
   app.enableCors({
-    origin: configService.get<string>('FRONTEND_ORIGIN'),
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl, Postman)
+      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+        return callback(null, true);
+      }
+      return callback(new Error(`Origin ${origin} not allowed by CORS`));
+    },
     credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'x-csrf-token',
+      'X-Requested-With',
+      'Accept',
+    ],
   });
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));

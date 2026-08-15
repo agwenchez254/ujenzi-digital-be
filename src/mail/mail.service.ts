@@ -75,8 +75,13 @@ export class MailService {
     }
   }
 
+  private get frontendOrigin(): string {
+    const raw = this.configService.get<string>('FRONTEND_ORIGIN') || 'http://localhost:8080';
+    return raw.split(',')[0].trim();
+  }
+
   async sendContractorInvitation(email: ContractorInvitationEmail): Promise<void> {
-    const link = `${this.configService.get<string>('FRONTEND_ORIGIN')}/invitations/accept?token=${email.token}&kind=contractor`;
+    const link = `${this.frontendOrigin}/invitations/accept?token=${email.token}&kind=contractor`;
     const subject = email.isResend
       ? `Reminder: you've been invited as contractor for ${email.siteName}`
       : `You've been invited as contractor for ${email.siteName}`;
@@ -106,7 +111,7 @@ export class MailService {
   }
 
   async sendPersonnelInvitation(email: PersonnelInvitationEmail): Promise<void> {
-    const link = `${this.configService.get<string>('FRONTEND_ORIGIN')}/invitations/accept?token=${email.token}&kind=personnel`;
+    const link = `${this.frontendOrigin}/invitations/accept?token=${email.token}&kind=personnel`;
     const subject = email.isResend
       ? `Reminder: you've been added to ${email.siteName}`
       : `You've been added to ${email.siteName} on SiteInspect`;
@@ -129,7 +134,7 @@ export class MailService {
   }
 
   async sendEmailChangeVerification(email: EmailChangeVerificationEmail): Promise<void> {
-    const link = `${this.configService.get<string>('FRONTEND_ORIGIN')}/profile/confirm-email?token=${email.token}`;
+    const link = `${this.frontendOrigin}/profile/confirm-email?token=${email.token}`;
     const subject = 'Confirm your new email address';
     const text =
       `Hi ${email.name},\n\n` +
@@ -140,7 +145,7 @@ export class MailService {
   }
 
   async sendInspectionAssignmentEmail(email: InspectionAssignmentEmail): Promise<void> {
-    const link = `${this.configService.get<string>('FRONTEND_ORIGIN')}/inspections`;
+    const link = `${this.frontendOrigin}/inspections`;
     const subject = `You've been requested to inspect ${email.siteName}`;
     const text =
       `Hi ${email.engineerName},\n\n` +
@@ -163,7 +168,7 @@ export class MailService {
   }
 
   async sendPasswordResetEmail(email: PasswordResetEmail): Promise<void> {
-    const link = `${this.configService.get<string>('FRONTEND_ORIGIN')}/reset-password?token=${email.token}`;
+    const link = `${this.frontendOrigin}/reset-password?token=${email.token}`;
     const subject = 'Reset your SiteInspect password';
     const text =
       `Hi ${email.name},\n\n` +
