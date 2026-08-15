@@ -290,10 +290,16 @@ export class AuthService {
       },
     });
 
+    // In production the frontend and backend are on different domains
+    // entirely (e.g. Netlify vs. a separate API host) — a SameSite=Lax
+    // cookie never gets attached to those cross-site fetch/XHR calls, so the
+    // silent refresh-on-load silently fails and looks like a logout. None
+    // requires Secure, which is why it's only safe to use over HTTPS (prod).
+    const isProduction = this.configService.get<string>('NODE_ENV') === 'production';
     res.cookie(REFRESH_COOKIE_NAME, refreshToken, {
       httpOnly: true,
-      secure: this.configService.get<string>('NODE_ENV') === 'production',
-      sameSite: 'lax',
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
       path: '/auth',
       maxAge: REFRESH_TOKEN_TTL_MS,
     });
