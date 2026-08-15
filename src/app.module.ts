@@ -8,6 +8,7 @@ import { AuditLogModule } from './audit-log/audit-log.module';
 import { AuthModule } from './auth/auth.module';
 import { CommonModule } from './common/common.module';
 import { CsrfMiddleware } from './common/csrf/csrf.middleware';
+import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { ContractorInvitationsModule } from './contractor-invitations/contractor-invitations.module';
@@ -52,6 +53,8 @@ import { UsersModule } from './users/users.module';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
+    consumer.apply(HttpLoggerMiddleware).forRoutes('*');
+
     consumer
       .apply(CsrfMiddleware)
       .forRoutes(
