@@ -14,7 +14,7 @@ COPY package.json pnpm-lock.yaml ./
 COPY prisma ./prisma
 
 # Install all dependencies (including devDependencies required for compilation)
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 
 # Copy source code and configuration files
 COPY tsconfig*.json nest-cli.json ./
