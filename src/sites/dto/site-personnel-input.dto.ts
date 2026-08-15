@@ -43,6 +43,18 @@ class RequiresEmailWhenInvitedConstraint implements ValidatorConstraintInterface
 }
 
 export class SitePersonnelInputDto {
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Set this to the existing SitePersonnel row id when re-submitting an unchanged entry on update — ' +
+      'omitting it (or an id that no longer matches) is treated as a brand-new entry and issues a fresh ' +
+      'invitation where applicable. A matched id never touches that row\'s invitation state (email/token/' +
+      'expiry/acceptedAt) — use the dedicated resend endpoint, or remove and re-add, to change an invited email.',
+  })
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
   @ApiProperty({ enum: SitePersonnelRole })
   @IsEnum(SitePersonnelRole)
   @Validate(ExactlyOneOfUserIdOrNameConstraint)

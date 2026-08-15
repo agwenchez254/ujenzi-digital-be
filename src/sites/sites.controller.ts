@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '../auth/types/jwt-payload.type';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
+import { AddSitePersonnelDto } from './dto/add-site-personnel.dto';
 import { CreateSiteDto } from './dto/create-site.dto';
 import { SetPublicSharingDto } from './dto/set-public-sharing.dto';
 import { UpdateSiteDto } from './dto/update-site.dto';
@@ -56,6 +57,22 @@ export class SitesController {
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser, @Ip() ip: string) {
     return this.sitesService.remove(id, user, ip);
+  }
+
+  @ApiOperation({
+    summary:
+      'Add personnel to a site (add-only — any contractor or developer already tied to the site, or an ' +
+      'administrator; does not affect existing entries or any other site field)',
+  })
+  @Roles('contractor', 'developer', 'administrator')
+  @Post(':id/personnel')
+  addPersonnel(
+    @Param('id') id: string,
+    @Body() dto: AddSitePersonnelDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Ip() ip: string,
+  ) {
+    return this.sitesService.addPersonnel(id, dto.personnel, user, ip);
   }
 
   @ApiOperation({

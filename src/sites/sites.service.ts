@@ -197,9 +197,39 @@ export class SitesService {
       });
 
       if (dto.personnel) {
-        await tx.sitePersonnel.deleteMany({ where: { siteId: id } });
-        if (dto.personnel.length) {
-          const { rows, invites } = this.buildPersonnelRows(dto.personnel, id);
+        // Reconcile against existing rows by id rather than deleting and
+        // recreating everything: a wholesale replace would wipe every
+        // matched row's invitation state (email/token/expiry/acceptedAt),
+        // permanently invalidating a still-pending invite's emailed link
+        // and resetting an already-accepted member's status back to
+        // "expired" — on every ordinary edit, not just personnel changes.
+        const existing = await tx.sitePersonnel.findMany({ where: { siteId: id } });
+        const existingById = new Map(existing.map((p) => [p.id, p]));
+        const submittedIds = new Set(dto.personnel.map((p) => p.id).filter((pid): pid is string => Boolean(pid)));
+
+        const removedIds = existing.filter((p) => !submittedIds.has(p.id)).map((p) => p.id);
+        if (removedIds.length) {
+          await tx.sitePersonnel.deleteMany({ where: { id: { in: removedIds } } });
+        }
+
+        const newEntries: SitePersonnelInputDto[] = [];
+        for (const p of dto.personnel) {
+          const match = p.id ? existingById.get(p.id) : undefined;
+          if (match) {
+            // Never touch invitation-tracking fields for a matched row —
+            // changing an invited email/resending is a separate, explicit
+            // action (the dedicated resend endpoint, or remove-and-re-add).
+            await tx.sitePersonnel.update({
+              where: { id: match.id },
+              data: { role: p.role, userId: p.userId, name: p.name, contact: p.contact },
+            });
+          } else {
+            newEntries.push(p);
+          }
+        }
+
+        if (newEntries.length) {
+          const { rows, invites } = this.buildPersonnelRows(newEntries, id);
           personnelInvites = invites;
           await tx.sitePersonnel.createMany({ data: rows });
         }
@@ -218,6 +248,37 @@ export class SitesService {
     if (personnelInvites.length) {
       const inviter = await this.prisma.user.findUnique({ where: { id: user.userId }, select: { name: true } });
       this.sendPersonnelInvites(personnelInvites, dto.name ?? site.name, inviter?.name ?? 'A site manager');
+    }
+
+    return this.findSiteOrThrow(id);
+  }
+
+  // Deliberately add-only and separate from update(): any contractor/developer
+  // already tied to the site (not just its owner or the linked DEVELOPER
+  // entry) can grow the roster this way, but editing/removing existing
+  // personnel — and every other site field — still requires being the
+  // owner, the linked developer, or an administrator via update()/remove().
+  async addPersonnel(id: string, entries: SitePersonnelInputDto[], user: AuthenticatedUser, ip?: string) {
+    const site = await this.findSiteOrThrow(id);
+
+    if (!user.roles.includes('administrator')) {
+      const hasEligibleRole = user.roles.includes('contractor') || user.roles.includes('developer');
+      const tied = hasEligibleRole && (await this.isTiedToSite(id, user.userId));
+      if (!tied) {
+        throw new ForbiddenException(
+          'You must be a contractor or developer already tied to this site to add personnel',
+        );
+      }
+    }
+
+    const { rows, invites } = this.buildPersonnelRows(entries, id);
+    await this.prisma.sitePersonnel.createMany({ data: rows });
+
+    await this.auditLogService.log(user.userId, 'site.personnel_added', 'Site', id, { count: rows.length }, ip);
+
+    if (invites.length) {
+      const inviter = await this.prisma.user.findUnique({ where: { id: user.userId }, select: { name: true } });
+      this.sendPersonnelInvites(invites, site.name, inviter?.name ?? 'A site manager');
     }
 
     return this.findSiteOrThrow(id);
