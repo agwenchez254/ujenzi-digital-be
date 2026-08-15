@@ -1,4 +1,12 @@
-import { ConflictException, ForbiddenException, GoneException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  GoneException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AppRole, User } from '@prisma/client';
@@ -18,6 +26,7 @@ const REFRESH_COOKIE_NAME = 'refreshToken';
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const ACCESS_TOKEN_TTL = '15m';
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
+const PASSWORD_HISTORY_SIZE = 2;
 
 export interface AuthResult {
   accessToken: string;
@@ -208,12 +217,31 @@ export class AuthService {
       throw new GoneException('This reset link has expired — request a new one');
     }
 
+    const recentHashes = [user.passwordHash, ...user.previousPasswordHashes].filter(
+      (hash): hash is string => Boolean(hash),
+    );
+    for (const hash of recentHashes) {
+      if (await bcrypt.compare(newPassword, hash)) {
+        throw new BadRequestException(
+          `Your new password must be different from your last ${PASSWORD_HISTORY_SIZE} passwords`,
+        );
+      }
+    }
+
     const passwordHash = await bcrypt.hash(newPassword, 12);
+    const previousPasswordHashes = [user.passwordHash, ...user.previousPasswordHashes]
+      .filter((hash): hash is string => Boolean(hash))
+      .slice(0, PASSWORD_HISTORY_SIZE);
 
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: user.id },
-        data: { passwordHash, passwordResetTokenHash: null, passwordResetExpiresAt: null },
+        data: {
+          passwordHash,
+          previousPasswordHashes,
+          passwordResetTokenHash: null,
+          passwordResetExpiresAt: null,
+        },
       }),
       // A password reset means the old credentials may have been compromised
       // — kill every existing session rather than leaving them valid.
