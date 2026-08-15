@@ -68,6 +68,8 @@ model User {
   pendingEmail         String?
   emailChangeTokenHash String?
   emailChangeExpiresAt DateTime?
+  passwordResetTokenHash String?
+  passwordResetExpiresAt DateTime?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
@@ -76,6 +78,7 @@ model User {
   sitesOwned                    Site[]                 @relation("ContractorSites")
   requestsMade                  InspectionRequest[]    @relation("ContractorRequests")
   requestsAssigned              InspectionRequest[]    @relation("EngineerRequests")
+  requestsSubmitted             InspectionRequest[]    @relation("RequestedInspectionRequests")
   inspections                   Inspection[]
   auditLogs                     AuditLog[]
   sitePersonnel                 SitePersonnel[]
@@ -208,19 +211,25 @@ model PushSubscription {
 }
 
 model InspectionRequest {
-  id            String                  @id @default(uuid())
-  siteId        String
-  contractorId  String
-  engineerId    String?
-  requestedDate DateTime                @db.Date
-  status        InspectionRequestStatus @default(pending)
-  notes         String?
-  createdAt     DateTime                @default(now())
-  updatedAt     DateTime                @updatedAt
+  id                String                  @id @default(uuid())
+  siteId            String
+  contractorId      String
+  engineerId        String?
+  // Who actually submitted the request — usually the contractor, but a
+  // developer or site representative tied to the same site can also create
+  // one, so this can't just be inferred from contractorId. Nullable since
+  // rows created before this field existed have no value to backfill.
+  requestedByUserId String?
+  requestedDate     DateTime                @db.Date
+  status            InspectionRequestStatus @default(pending)
+  notes             String?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
 
   site        Site         @relation(fields: [siteId], references: [id], onDelete: Cascade)
   contractor  User         @relation("ContractorRequests", fields: [contractorId], references: [id])
   engineer    User?        @relation("EngineerRequests", fields: [engineerId], references: [id])
+  requestedBy User?        @relation("RequestedInspectionRequests", fields: [requestedByUserId], references: [id])
   inspections Inspection[]
 }
 

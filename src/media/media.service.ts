@@ -77,6 +77,27 @@ export class MediaService {
     return { stream: this.storageService.read(media.url), extension: path.extname(media.url) };
   }
 
+  async replace(id: string, file: Express.Multer.File, user: AuthenticatedUser, ip?: string) {
+    const media = await this.findMediaOrThrow(id);
+    const inspection = await this.prisma.inspection.findUniqueOrThrow({ where: { id: media.inspectionId } });
+    this.assertOwnerOrAdmin(inspection.engineerId, user);
+    if (inspection.status !== 'in_progress') {
+      throw new ConflictException('Media can only be replaced on an in-progress inspection');
+    }
+
+    const type = file.mimetype.startsWith('video/') ? 'video' : 'photo';
+    const extension = path.extname(file.originalname);
+    const filename = `${randomUUID()}${extension}`;
+    const url = await this.storageService.save(file.buffer, MEDIA_NAMESPACE, filename);
+    await this.storageService.delete(media.url);
+
+    const updated = await this.prisma.media.update({ where: { id }, data: { url, type } });
+
+    await this.auditLogService.log(user.userId, 'media.replaced', 'Media', id, { inspectionId: media.inspectionId }, ip);
+
+    return updated;
+  }
+
   async remove(id: string, user: AuthenticatedUser, ip?: string) {
     const media = await this.findMediaOrThrow(id);
     const inspection = await this.prisma.inspection.findUniqueOrThrow({ where: { id: media.inspectionId } });

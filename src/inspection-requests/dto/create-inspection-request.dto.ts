@@ -14,4 +14,9 @@ export class CreateInspectionRequestDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiPropertyOptional({ format: 'uuid', description: 'Assign a specific engineer up front instead of broadcasting to all engineers.' })
+  @IsOptional()
+  @IsUUID()
+  engineerId?: string;
 }

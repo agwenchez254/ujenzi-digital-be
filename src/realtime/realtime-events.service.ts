@@ -29,6 +29,28 @@ export class RealtimeEventsService {
     }
 
     const userIds = await this.resolveUserIds(targets);
+
+    // Administrators see every notification regardless of who the event was
+    // actually targeted at — added here rather than at each call site so
+    // every current and future emit() call gets this for free.
+    const admins = await this.prisma.userRole.findMany({
+      where: { role: 'administrator' },
+      select: { userId: true },
+    });
+    const recipientIds = new Set([...userIds, ...admins.map((a) => a.userId)]);
+
+    if (recipientIds.size) {
+      await this.prisma.notification.createMany({
+        data: [...recipientIds].map((userId) => ({
+          userId,
+          type: event,
+          title: push.title,
+          body: push.body,
+          link: push.url,
+        })),
+      });
+    }
+
     await Promise.all(userIds.map((userId) => this.notifyIfOffline(userId, push)));
   }
 

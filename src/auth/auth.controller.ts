@@ -20,6 +20,8 @@ import { Public } from '../common/decorators/public.decorator';
 import { CsrfService } from '../common/csrf/csrf.service';
 import { AuthService } from './auth.service';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
+import { RequestPasswordResetDto } from './dto/request-password-reset.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { SignupDto } from './dto/signup.dto';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
 import { LocalAuthGuard } from './guards/local-auth.guard';
@@ -72,6 +74,24 @@ export class AuthController {
   @Post('logout')
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     await this.authService.logout(req.cookies?.['refreshToken'], res);
+    return { success: true };
+  }
+
+  @ApiOperation({ summary: 'Request a password reset link by email (always returns success, regardless of whether the email exists)' })
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Post('forgot-password')
+  async forgotPassword(@Body() dto: RequestPasswordResetDto) {
+    await this.authService.requestPasswordReset(dto.email);
+    return { success: true };
+  }
+
+  @ApiOperation({ summary: 'Reset a password using the token emailed by /auth/forgot-password' })
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Post('reset-password')
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    await this.authService.resetPassword(dto.token, dto.newPassword);
     return { success: true };
   }
 

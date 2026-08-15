@@ -15,7 +15,9 @@ import { InspectionRequestsModule } from './inspection-requests/inspection-reque
 import { InspectionsModule } from './inspections/inspections.module';
 import { MailModule } from './mail/mail.module';
 import { MediaModule } from './media/media.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { PermissionsModule } from './permissions/permissions.module';
+import { PersonnelInvitationsModule } from './personnel-invitations/personnel-invitations.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { SitesModule } from './sites/sites.module';
@@ -34,7 +36,9 @@ import { UsersModule } from './users/users.module';
     InspectionsModule,
     MailModule,
     MediaModule,
+    NotificationsModule,
     PermissionsModule,
+    PersonnelInvitationsModule,
     RealtimeModule,
     SitesModule,
     UsersModule,

@@ -2,6 +2,7 @@ import { ConflictException, ForbiddenException, Injectable, NotFoundException } 
 import { InspectionRequest, Site } from '@prisma/client';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/types/jwt-payload.type';
+import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeEventsService } from '../realtime/realtime-events.service';
 import { SitesService } from '../sites/sites.service';
@@ -14,7 +15,22 @@ const REQUEST_INCLUDE = {
     select: { id: true, name: true, address: true, latitude: true, longitude: true, geofenceRadius: true },
   },
   contractor: { select: { id: true, name: true, company: true } },
-  engineer: { select: { id: true, name: true } },
+  engineer: { select: { id: true, name: true, avatarUrl: true } },
+  // At most one Inspection is ever active per request in practice (starting one
+  // flips the request off `accepted`), so the most recent row is "the" inspection.
+  inspections: {
+    take: 1,
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      media: {
+        take: 4,
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, type: true },
+      },
+      _count: { select: { media: true } },
+    },
+  },
 } as const;
 
 @Injectable()
@@ -24,6 +40,7 @@ export class InspectionRequestsService {
     private auditLogService: AuditLogService,
     private realtimeEventsService: RealtimeEventsService,
     private sitesService: SitesService,
+    private mailService: MailService,
   ) {}
 
   async findAll(user: AuthenticatedUser) {
@@ -51,10 +68,14 @@ export class InspectionRequestsService {
     const site = await this.findSiteOrThrow(dto.siteId);
     await this.assertTiedOrAdmin(site.id, user);
 
+    const assignedEngineer = dto.engineerId ? await this.findEngineerOrThrow(dto.engineerId) : null;
+
     const request = await this.prisma.inspectionRequest.create({
       data: {
         siteId: dto.siteId,
         contractorId: site.contractorId,
+        engineerId: assignedEngineer?.id,
+        requestedByUserId: user.userId,
         requestedDate: new Date(dto.requestedDate),
         notes: dto.notes,
       },
@@ -66,16 +87,38 @@ export class InspectionRequestsService {
       'inspection_request.created',
       'InspectionRequest',
       request.id,
-      { siteId: dto.siteId, contractorId: site.contractorId },
+      { siteId: dto.siteId, contractorId: site.contractorId, engineerId: assignedEngineer?.id },
       ip,
     );
 
+    // Only engineers (who might pick it up) and admins need to know a request
+    // exists — the site's own contractor/personnel already know, they just
+    // made it. No siteIds target here on purpose: that would fan this out to
+    // everyone tied to the site, not just the people who can act on it.
     await this.realtimeEventsService.emit(
       'inspection-request.created',
       request,
-      { siteIds: [request.siteId], roles: ['engineer', 'administrator'] },
-      { title: 'New inspection request', body: `${request.site.name} — requested by ${request.contractor.name}` },
+      assignedEngineer
+        ? { userIds: [assignedEngineer.id], roles: ['administrator'] }
+        : { roles: ['engineer', 'administrator'] },
+      {
+        title: assignedEngineer ? "You've been requested for an inspection" : 'New inspection request',
+        body: `${request.site.name} — requested by ${request.contractor.name}`,
+        url: '/inspections',
+      },
     );
+
+    if (assignedEngineer) {
+      await this.mailService.sendInspectionAssignmentEmail({
+        to: assignedEngineer.email,
+        engineerName: assignedEngineer.name,
+        siteName: request.site.name,
+        siteAddress: request.site.address,
+        requestedByName: request.contractor.name,
+        requestedDate: request.requestedDate,
+        notes: request.notes,
+      });
+    }
 
     return request;
   }
@@ -110,7 +153,7 @@ export class InspectionRequestsService {
   async accept(id: string, dto: AcceptInspectionRequestDto, user: AuthenticatedUser, ip?: string) {
     const request = await this.findRequestOrThrow(id);
     this.assertPending(request);
-    const engineerId = this.resolveEngineerId(dto, user);
+    const engineerId = this.resolveEngineerId(dto, user, request);
 
     const updated = await this.prisma.inspectionRequest.update({
       where: { id },
@@ -127,13 +170,17 @@ export class InspectionRequestsService {
       ip,
     );
 
+    // Only the person who actually submitted the request needs to know it
+    // was accepted — not every engineer who saw the original broadcast, and
+    // not the site's other personnel.
     await this.realtimeEventsService.emit(
       'inspection-request.accepted',
       updated,
-      { siteIds: [updated.siteId] },
+      { userIds: [updated.requestedByUserId ?? updated.contractorId] },
       {
         title: 'Inspection request accepted',
         body: `${updated.site.name} — accepted by ${updated.engineer?.name ?? 'an engineer'}`,
+        url: `/inspections/${updated.id}`,
       },
     );
 
@@ -155,8 +202,8 @@ export class InspectionRequestsService {
     await this.realtimeEventsService.emit(
       'inspection-request.rejected',
       updated,
-      { siteIds: [updated.siteId] },
-      { title: 'Inspection request rejected', body: updated.site.name },
+      { userIds: [updated.requestedByUserId ?? updated.contractorId] },
+      { title: 'Inspection request rejected', body: updated.site.name, url: '/inspections' },
     );
 
     return updated;
@@ -176,14 +223,29 @@ export class InspectionRequestsService {
     }
   }
 
-  private resolveEngineerId(dto: AcceptInspectionRequestDto, user: AuthenticatedUser): string {
+  private resolveEngineerId(dto: AcceptInspectionRequestDto, user: AuthenticatedUser, request: InspectionRequest): string {
     if (user.roles.includes('administrator')) {
-      if (!dto.engineerId) {
+      const engineerId = dto.engineerId ?? request.engineerId;
+      if (!engineerId) {
         throw new ForbiddenException('engineerId is required when an administrator accepts a request');
       }
-      return dto.engineerId;
+      return engineerId;
+    }
+    if (request.engineerId && request.engineerId !== user.userId) {
+      throw new ForbiddenException('This request is already assigned to another engineer');
     }
     return user.userId;
+  }
+
+  private async findEngineerOrThrow(engineerId: string) {
+    const engineer = await this.prisma.user.findUnique({
+      where: { id: engineerId },
+      include: { roles: true },
+    });
+    if (!engineer || engineer.status !== 'active' || !engineer.roles.some((r) => r.role === 'engineer')) {
+      throw new NotFoundException('Engineer not found');
+    }
+    return { id: engineer.id, name: engineer.name, email: engineer.email };
   }
 
   private assertPending(request: InspectionRequest) {

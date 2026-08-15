@@ -6,6 +6,7 @@ import {
   Ip,
   Param,
   Post,
+  Put,
   Res,
   UnsupportedMediaTypeException,
   UploadedFile,
@@ -30,6 +31,18 @@ const CONTENT_TYPES: Record<string, string> = {
   '.mov': 'video/quicktime',
   '.webm': 'video/webm',
 };
+
+const mediaFileInterceptor = () =>
+  FileInterceptor('file', {
+    limits: { fileSize: 25 * 1024 * 1024 },
+    fileFilter: (_req, file, callback) => {
+      if (!/^(image|video)\//.test(file.mimetype)) {
+        callback(new UnsupportedMediaTypeException('Only image or video uploads are allowed'), false);
+        return;
+      }
+      callback(null, true);
+    },
+  });
 
 @ApiTags('Media')
 @ApiBearerAuth()
@@ -58,18 +71,7 @@ export class MediaController {
     },
   })
   @Roles('engineer', 'administrator')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      limits: { fileSize: 25 * 1024 * 1024 },
-      fileFilter: (_req, file, callback) => {
-        if (!/^(image|video)\//.test(file.mimetype)) {
-          callback(new UnsupportedMediaTypeException('Only image or video uploads are allowed'), false);
-          return;
-        }
-        callback(null, true);
-      },
-    }),
-  )
+  @UseInterceptors(mediaFileInterceptor())
   @Post('inspections/:inspectionId/media')
   upload(
     @Param('inspectionId') inspectionId: string,
@@ -79,6 +81,21 @@ export class MediaController {
     @Ip() ip: string,
   ) {
     return this.mediaService.upload(inspectionId, file, dto, user, ip);
+  }
+
+  @ApiOperation({ summary: "Replace a media item's file in place, keeping its id (owning engineer or administrator, in-progress inspection only)" })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } }, required: ['file'] } })
+  @Roles('engineer', 'administrator')
+  @UseInterceptors(mediaFileInterceptor())
+  @Put('media/:id/file')
+  replace(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: AuthenticatedUser,
+    @Ip() ip: string,
+  ) {
+    return this.mediaService.replace(id, file, user, ip);
   }
 
   @ApiOperation({ summary: 'Stream a media file (tied users, the assigned engineer, or an administrator)' })

@@ -13,6 +13,10 @@ function invitationStatus(invitation: { acceptedAt: Date | null; expiresAt: Date
   return 'pending';
 }
 
+function displayName(invited: { name: string } | null, email: string): string {
+  return invited?.name ?? email.split('@')[0];
+}
+
 @Injectable()
 export class ContractorInvitationsService {
   constructor(
@@ -28,15 +32,16 @@ export class ContractorInvitationsService {
       invitedByName: invitation.invitedBy.name,
       status: invitationStatus(invitation),
       expiresAt: invitation.expiresAt,
+      invitedEmail: invitation.invitedEmail,
+      // False means no account exists yet for this invite — the frontend
+      // should show a signup form instead of a login-and-accept prompt.
+      hasAccount: invitation.invitedUserId !== null,
     };
   }
 
   async accept(token: string, user: AuthenticatedUser, ip?: string) {
     const invitation = await this.findByToken(token);
 
-    if (invitation.invitedUserId !== user.userId) {
-      throw new ForbiddenException('This invitation was not sent to your account');
-    }
     if (invitation.acceptedAt) {
       throw new ConflictException('This invitation has already been accepted');
     }
@@ -44,14 +49,30 @@ export class ContractorInvitationsService {
       throw new GoneException('This invitation has expired — ask the site owner to resend it');
     }
 
+    if (invitation.invitedUserId) {
+      if (invitation.invitedUserId !== user.userId) {
+        throw new ForbiddenException('This invitation was not sent to your account');
+      }
+    } else {
+      // Freeform invite — first account whose email matches claims it.
+      const caller = await this.prisma.user.findUniqueOrThrow({ where: { id: user.userId }, select: { email: true } });
+      if (invitation.invitedEmail.toLowerCase() !== caller.email.toLowerCase()) {
+        throw new ForbiddenException('This invitation was not sent to your account');
+      }
+    }
+
     await this.prisma.$transaction([
       this.prisma.contractorInvitation.update({
         where: { id: invitation.id },
-        data: { acceptedAt: new Date() },
+        data: { acceptedAt: new Date(), invitedUserId: user.userId },
       }),
       this.prisma.site.update({
         where: { id: invitation.siteId },
-        data: { contractorId: invitation.invitedUserId },
+        data: { contractorId: user.userId },
+      }),
+      this.prisma.sitePersonnel.updateMany({
+        where: { siteId: invitation.siteId, role: 'CONTRACTOR' },
+        data: { userId: user.userId },
       }),
     ]);
 
@@ -81,8 +102,8 @@ export class ContractorInvitationsService {
     }
 
     return {
-      invitedUserName: invitation.invited.name,
-      invitedUserEmail: invitation.invited.email,
+      invitedUserName: displayName(invitation.invited, invitation.invitedEmail),
+      invitedUserEmail: invitation.invitedEmail,
       status: invitationStatus(invitation),
       expiresAt: invitation.expiresAt,
     };
@@ -91,7 +112,17 @@ export class ContractorInvitationsService {
   async resend(siteId: string, user: AuthenticatedUser, ip?: string) {
     const site = await this.prisma.site.findUnique({
       where: { id: siteId },
-      select: { contractorId: true, name: true },
+      select: {
+        contractorId: true,
+        name: true,
+        address: true,
+        latitude: true,
+        longitude: true,
+        constructionPhase: true,
+        developmentType: true,
+        expectedEndDate: true,
+        landmarks: true,
+      },
     });
     if (!site) {
       throw new NotFoundException('Site not found');
@@ -124,12 +155,19 @@ export class ContractorInvitationsService {
     await this.auditLogService.log(user.userId, 'site.contractor_invitation_resent', 'Site', siteId, undefined, ip);
 
     await this.mailService.sendContractorInvitation({
-      to: invitation.invited.email,
-      contractorName: invitation.invited.name,
+      to: invitation.invitedEmail,
+      contractorName: displayName(invitation.invited, invitation.invitedEmail),
       siteName: site.name,
       developerName: invitation.invitedBy.name,
       token,
       isResend: true,
+      address: site.address,
+      latitude: Number(site.latitude),
+      longitude: Number(site.longitude),
+      constructionPhase: site.constructionPhase,
+      developmentType: site.developmentType,
+      expectedEndDate: site.expectedEndDate,
+      landmarks: site.landmarks,
     });
   }
 

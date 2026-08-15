@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { SitePersonnelRole } from '@prisma/client';
 import {
+  IsBoolean,
+  IsEmail,
   IsEnum,
   IsOptional,
   IsString,
@@ -20,6 +22,23 @@ class ExactlyOneOfUserIdOrNameConstraint implements ValidatorConstraintInterface
 
   defaultMessage(): string {
     return 'Provide exactly one of userId (linked account) or name (freeform contact)';
+  }
+}
+
+// A freeform CONTRACTOR always needs an invitation (site ownership transfers
+// on acceptance, so it must go to a real, confirmed account). Every other
+// freeform role only needs one if sendInvite was explicitly requested.
+@ValidatorConstraint({ name: 'requiresEmailWhenInvited' })
+class RequiresEmailWhenInvitedConstraint implements ValidatorConstraintInterface {
+  validate(email: unknown, args: ValidationArguments): boolean {
+    const dto = args.object as SitePersonnelInputDto;
+    if (dto.userId) return true;
+    const inviteRequired = dto.role === SitePersonnelRole.CONTRACTOR || dto.sendInvite;
+    return !inviteRequired || Boolean(email);
+  }
+
+  defaultMessage(): string {
+    return 'email is required to send a signup invitation (mandatory for the contractor role)';
   }
 }
 
@@ -45,4 +64,21 @@ export class SitePersonnelInputDto {
   @IsOptional()
   @IsString()
   contact?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Required when sendInvite is true, or always for a freeform CONTRACTOR. Sends a signup invitation to this address.',
+  })
+  @IsOptional()
+  @IsEmail()
+  @Validate(RequiresEmailWhenInvitedConstraint)
+  email?: string;
+
+  @ApiPropertyOptional({
+    default: false,
+    description: 'Freeform, non-contractor roles only — whether to email this person a signup invitation.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  sendInvite?: boolean;
 }

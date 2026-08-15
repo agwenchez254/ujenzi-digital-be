@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, GoneException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AppRole, User } from '@prisma/client';
@@ -6,6 +6,8 @@ import * as bcrypt from 'bcrypt';
 import { createHash, randomUUID } from 'crypto';
 import { Response } from 'express';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { generateToken, hashToken } from '../common/utils/token.util';
+import { MailService } from '../mail/mail.service';
 import { PermissionsService } from '../permissions/permissions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompleteProfileDto } from './dto/complete-profile.dto';
@@ -15,6 +17,7 @@ import { GoogleProfile } from './strategies/google.strategy';
 const REFRESH_COOKIE_NAME = 'refreshToken';
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const ACCESS_TOKEN_TTL = '15m';
+const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
 
 export interface AuthResult {
   accessToken: string;
@@ -30,6 +33,7 @@ export class AuthService {
     private configService: ConfigService,
     private auditLogService: AuditLogService,
     private permissionsService: PermissionsService,
+    private mailService: MailService,
   ) {}
 
   async signup(dto: SignupDto, res: Response, ip?: string): Promise<AuthResult> {
@@ -173,6 +177,53 @@ export class AuthService {
       });
     }
     res.clearCookie(REFRESH_COOKIE_NAME, { path: '/auth' });
+  }
+
+  async requestPasswordReset(email: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    // Always behave the same whether or not the email exists, so a caller
+    // can't use this endpoint to discover which emails are registered.
+    if (!user || !user.passwordHash) {
+      return;
+    }
+
+    const token = generateToken();
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetTokenHash: hashToken(token),
+        passwordResetExpiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS),
+      },
+    });
+
+    await this.mailService.sendPasswordResetEmail({ to: user.email, name: user.name, token });
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const user = await this.prisma.user.findFirst({ where: { passwordResetTokenHash: hashToken(token) } });
+    if (!user) {
+      throw new NotFoundException('Invalid or expired reset link');
+    }
+    if (!user.passwordResetExpiresAt || user.passwordResetExpiresAt.getTime() < Date.now()) {
+      throw new GoneException('This reset link has expired — request a new one');
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash, passwordResetTokenHash: null, passwordResetExpiresAt: null },
+      }),
+      // A password reset means the old credentials may have been compromised
+      // — kill every existing session rather than leaving them valid.
+      this.prisma.refreshToken.updateMany({
+        where: { userId: user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+
+    await this.auditLogService.log(user.id, 'user.password_reset', 'User', user.id, undefined, undefined);
   }
 
   private async getRoles(userId: string): Promise<AppRole[]> {

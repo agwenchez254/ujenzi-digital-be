@@ -1,9 +1,11 @@
-import { Body, Controller, Get, Ip, Param, Patch, Query } from '@nestjs/common';
+import { Body, Controller, Get, Ip, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '../auth/types/jwt-payload.type';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { LookupUserDto } from './dto/lookup-user.dto';
+import { RequestEmailChangeDto } from './dto/request-email-change.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateRolesDto } from './dto/update-roles.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
@@ -27,10 +29,29 @@ export class UsersController {
     return this.usersService.updateSelf(user.userId, dto);
   }
 
+  @ApiOperation({ summary: "Request an email change — sends a confirmation link to the new address" })
+  @Post('me/email-change')
+  requestEmailChange(@CurrentUser() user: AuthenticatedUser, @Body() dto: RequestEmailChangeDto) {
+    return this.usersService.requestEmailChange(user.userId, dto);
+  }
+
+  @ApiOperation({ summary: 'Confirm an email change via its emailed token (no auth required)' })
+  @Public()
+  @Post('email-change/confirm/:token')
+  confirmEmailChange(@Param('token') token: string) {
+    return this.usersService.confirmEmailChange(token);
+  }
+
   @ApiOperation({ summary: 'Look up a user by email (any authenticated user) — for linking site personnel' })
   @Get('lookup')
   lookup(@Query() query: LookupUserDto) {
     return this.usersService.lookupByEmail(query.email);
+  }
+
+  @ApiOperation({ summary: 'List active engineers (any authenticated user) — for assigning inspection requests' })
+  @Get('engineers')
+  findEngineers() {
+    return this.usersService.findEngineers();
   }
 
   @ApiOperation({ summary: 'List all users (administrator only)' })

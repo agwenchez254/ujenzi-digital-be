@@ -91,7 +91,7 @@ export class InspectionsService {
       'inspection.started',
       inspection,
       { siteIds: [inspection.siteId] },
-      { title: 'Inspection started', body: inspection.site.name },
+      { title: 'Inspection started', body: inspection.site.name, url: `/inspections/${inspection.requestId}` },
     );
 
     return inspection;
@@ -166,8 +166,21 @@ export class InspectionsService {
       'inspection.submitted',
       updated,
       { siteIds: [updated.siteId] },
-      { title: 'Inspection submitted', body: updated.site.name },
+      { title: 'Inspection submitted', body: updated.site.name, url: `/inspections/${updated.requestId}` },
     );
+
+    if (updated.riskLevel === 'high' || updated.riskLevel === 'critical') {
+      await this.realtimeEventsService.emit(
+        'inspection.high_risk',
+        updated,
+        { siteIds: [updated.siteId], roles: ['administrator'] },
+        {
+          title: 'High Risk Flagged',
+          body: `${updated.site.name} — ${updated.riskLevel} risk`,
+          url: `/inspections/${updated.requestId}`,
+        },
+      );
+    }
 
     return updated;
   }
