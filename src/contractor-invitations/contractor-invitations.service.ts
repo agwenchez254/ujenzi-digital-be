@@ -1,7 +1,8 @@
 import { BadRequestException, ConflictException, ForbiddenException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/types/jwt-payload.type';
-import { generateToken, hashToken } from '../common/utils/token.util';
+import { buildInvitationLink, generateToken, hashToken } from '../common/utils/token.util';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -23,6 +24,7 @@ export class ContractorInvitationsService {
     private prisma: PrismaService,
     private auditLogService: AuditLogService,
     private mailService: MailService,
+    private configService: ConfigService,
   ) {}
 
   async previewByToken(token: string) {

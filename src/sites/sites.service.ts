@@ -1,8 +1,9 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma, Site } from '@prisma/client';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/types/jwt-payload.type';
-import { generateToken, hashToken } from '../common/utils/token.util';
+import { buildInvitationLink, generateToken, hashToken } from '../common/utils/token.util';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeEventsService } from '../realtime/realtime-events.service';
@@ -15,6 +16,12 @@ interface PendingPersonnelInvite {
   role: string;
   email: string;
   token: string;
+}
+
+export interface PersonnelInvitationLink {
+  name: string;
+  role: string;
+  link: string;
 }
 
 const CONTRACTOR_SELECT = { id: true, name: true, company: true } as const;
@@ -53,7 +60,25 @@ export class SitesService {
     private auditLogService: AuditLogService,
     private mailService: MailService,
     private realtimeEventsService: RealtimeEventsService,
+    private configService: ConfigService,
   ) {}
+
+  // Invitation links are only ever available in plaintext at the moment a
+  // token is generated (only its hash is persisted) — this is why every
+  // link is handed back in the same response that creates/rotates the
+  // token, rather than something a later GET could reconstruct.
+  private linkForToken(token: string, kind: 'contractor' | 'personnel'): string {
+    const origin = this.configService.get<string>('FRONTEND_ORIGIN') || 'http://localhost:8080';
+    return buildInvitationLink(origin, token, kind);
+  }
+
+  private personnelInvitationLinks(invites: PendingPersonnelInvite[]): PersonnelInvitationLink[] {
+    return invites.map((invite) => ({
+      name: invite.name,
+      role: invite.role,
+      link: this.linkForToken(invite.token, 'personnel'),
+    }));
+  }
 
   async findAll(user: AuthenticatedUser) {
     const where = user.roles.includes('administrator')
@@ -165,7 +190,12 @@ export class SitesService {
       this.sendPersonnelInvites(personnelInvites, created.name, inviter?.name ?? 'A site manager');
     }
 
-    return this.findSiteOrThrow(created.id);
+    const site = await this.findSiteOrThrow(created.id);
+    return {
+      ...site,
+      contractorInvitationLink: invitationToken ? this.linkForToken(invitationToken, 'contractor') : undefined,
+      personnelInvitationLinks: this.personnelInvitationLinks(personnelInvites),
+    };
   }
 
   async update(id: string, dto: UpdateSiteDto, user: AuthenticatedUser, ip?: string) {
@@ -250,7 +280,8 @@ export class SitesService {
       this.sendPersonnelInvites(personnelInvites, dto.name ?? site.name, inviter?.name ?? 'A site manager');
     }
 
-    return this.findSiteOrThrow(id);
+    const updated = await this.findSiteOrThrow(id);
+    return { ...updated, personnelInvitationLinks: this.personnelInvitationLinks(personnelInvites) };
   }
 
   // Deliberately add-only and separate from update(): any contractor/developer
@@ -281,7 +312,8 @@ export class SitesService {
       this.sendPersonnelInvites(invites, site.name, inviter?.name ?? 'A site manager');
     }
 
-    return this.findSiteOrThrow(id);
+    const updated = await this.findSiteOrThrow(id);
+    return { ...updated, personnelInvitationLinks: this.personnelInvitationLinks(invites) };
   }
 
   async remove(id: string, user: AuthenticatedUser, ip?: string) {
