@@ -11,7 +11,6 @@ import {
   Get,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { ThrottlerGuard } from '@nestjs/throttler';
 import { User } from '@prisma/client';
 import type { Request, Response } from 'express';
 import { AllowNoRole } from '../common/decorators/allow-no-role.decorator';
@@ -29,7 +28,6 @@ import type { GoogleProfile } from './strategies/google.strategy';
 import type { AuthenticatedUser } from './types/jwt-payload.type';
 
 @ApiTags('Auth')
-@UseGuards(ThrottlerGuard)
 @Controller('auth')
 export class AuthController {
   constructor(
