@@ -40,6 +40,7 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV PATH="/app/node_modules/.bin:$PATH"
 
 # Copy package manifests & prisma schema
 COPY package.json pnpm-lock.yaml ./
