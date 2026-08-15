@@ -21,7 +21,7 @@ COPY tsconfig*.json nest-cli.json ./
 COPY src ./src
 
 # Provide build-time DATABASE_URL for Prisma schema validation
-ENV DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ujenzi_digital?schema=public"
+ENV DATABASE_URL="postgresql://postgres:agwenchez@Agwenchez254:5433/ujenzi_digital?schema=public"
 
 # Generate Prisma Client & Build the application
 RUN pnpm exec prisma generate
@@ -61,4 +61,3 @@ RUN mkdir -p /app/uploads
 EXPOSE 3000
 
 CMD ["node", "dist/main"]
-
