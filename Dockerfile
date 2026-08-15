@@ -20,8 +20,11 @@ RUN pnpm install --no-frozen-lockfile
 COPY tsconfig*.json nest-cli.json ./
 COPY src ./src
 
+# Provide build-time DATABASE_URL for Prisma schema validation
+ENV DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ujenzi_digital?schema=public"
+
 # Generate Prisma Client & Build the application
-RUN pnpm prisma generate
+RUN pnpm exec prisma generate
 RUN pnpm run build
 
 # Prune devDependencies to keep only production dependencies in node_modules
