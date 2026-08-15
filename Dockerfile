@@ -1,21 +1,22 @@
 # ----------------------------------------------------
 # Stage 1: Build Stage
 # ----------------------------------------------------
-FROM node:24.18.0-alpine AS builder
+FROM node:20-alpine AS builder
 
-# Install pnpm
+# Install build dependencies for native packages (bcrypt, prisma)
+RUN apk add --no-cache python3 make g++ openssl libc6-compat
 RUN npm install -g pnpm
 
 WORKDIR /app
 
-# Copy package manifests & prisma schema first to leverage layer caching
+# Copy package manifests & prisma schema first
 COPY package.json pnpm-lock.yaml ./
 COPY prisma ./prisma
 
-# Install all dependencies (including devDependencies required for nest build)
+# Install all dependencies (including devDependencies required for compilation)
 RUN pnpm install --frozen-lockfile
 
-# Copy source code and config files
+# Copy source code and configuration files
 COPY tsconfig*.json nest-cli.json ./
 COPY src ./src
 
@@ -23,13 +24,16 @@ COPY src ./src
 RUN pnpm prisma generate
 RUN pnpm run build
 
+# Prune devDependencies to keep only production dependencies in node_modules
+RUN pnpm prune --prod
+
 # ----------------------------------------------------
 # Stage 2: Production Runner Stage
 # ----------------------------------------------------
-FROM node:24.18.0-alpine AS runner
+FROM node:20-alpine AS runner
 
-# Install pnpm and openssl (required for Prisma on alpine)
-RUN apk add --no-cache openssl
+# Install runtime dependencies for Prisma and OpenSSL
+RUN apk add --no-cache openssl libc6-compat
 RUN npm install -g pnpm
 
 WORKDIR /app
@@ -41,18 +45,16 @@ ENV PORT=3000
 COPY package.json pnpm-lock.yaml ./
 COPY prisma ./prisma
 
-# Install only production dependencies
-RUN pnpm install --prod --frozen-lockfile
+# Copy production node_modules directly from builder (avoids re-compiling bcrypt)
+COPY --from=builder /app/node_modules ./node_modules
 
 # Copy compiled JavaScript output from the builder stage
 COPY --from=builder /app/dist ./dist
 
-# Generate Prisma Client in the runner stage
-RUN pnpm prisma generate
-
-# Create directory for file uploads if local filesystem storage is used
+# Create directory for persistent uploads
 RUN mkdir -p /app/uploads
 
 EXPOSE 3000
 
 CMD ["node", "dist/main"]
+
