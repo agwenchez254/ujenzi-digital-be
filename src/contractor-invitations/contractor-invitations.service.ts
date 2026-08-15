@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/types/jwt-payload.type';

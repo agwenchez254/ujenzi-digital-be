@@ -6,9 +6,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuthenticatedUser } from '../auth/types/jwt-payload.type';
-import { generateToken, hashToken } from '../common/utils/token.util';
+import { buildInvitationLink, generateToken, hashToken } from '../common/utils/token.util';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -29,6 +30,7 @@ export class PersonnelInvitationsService {
     private prisma: PrismaService,
     private auditLogService: AuditLogService,
     private mailService: MailService,
+    private configService: ConfigService,
   ) {}
 
   async previewByToken(token: string) {
@@ -96,10 +98,10 @@ export class PersonnelInvitationsService {
     if (personnel.invitationAcceptedAt) {
       throw new ConflictException('This invitation has already been accepted');
     }
-    if (personnel.invitationExpiresAt && personnel.invitationExpiresAt.getTime() >= Date.now()) {
-      throw new BadRequestException('This invitation has not expired yet');
-    }
 
+    // No "must be expired first" guard — see the same comment in
+    // ContractorInvitationsService.resend(): this also serves as "get me
+    // the invite link again" while it's still pending, not just once expired.
     const token = generateToken();
     await this.prisma.sitePersonnel.update({
       where: { id: personnel.id },
@@ -128,6 +130,9 @@ export class PersonnelInvitationsService {
       token,
       isResend: true,
     });
+
+    const origin = this.configService.get<string>('FRONTEND_ORIGIN') || 'http://localhost:8080';
+    return { link: buildInvitationLink(origin, token, 'personnel') };
   }
 
   private assertCanManage(site: { contractorId: string }, user: AuthenticatedUser) {
