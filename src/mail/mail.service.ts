@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import { buildInvitationLink } from '../common/utils/token.util';
 import { renderContractorInvitationHtml } from './templates/contractor-invitation.template';
 import { renderInspectionAssignmentHtml } from './templates/inspection-assignment.template';
 import { renderPasswordResetHtml } from './templates/password-reset.template';
@@ -81,7 +82,7 @@ export class MailService {
   }
 
   async sendContractorInvitation(email: ContractorInvitationEmail): Promise<void> {
-    const link = `${this.frontendOrigin}/invitations/accept?token=${email.token}&kind=contractor`;
+    const link = buildInvitationLink(this.frontendOrigin, email.token, 'contractor');
     const subject = email.isResend
       ? `Reminder: you've been invited as contractor for ${email.siteName}`
       : `You've been invited as contractor for ${email.siteName}`;
@@ -111,7 +112,7 @@ export class MailService {
   }
 
   async sendPersonnelInvitation(email: PersonnelInvitationEmail): Promise<void> {
-    const link = `${this.frontendOrigin}/invitations/accept?token=${email.token}&kind=personnel`;
+    const link = buildInvitationLink(this.frontendOrigin, email.token, 'personnel');
     const subject = email.isResend
       ? `Reminder: you've been added to ${email.siteName}`
       : `You've been added to ${email.siteName} on SiteInspect`;
