@@ -6,7 +6,15 @@ import { generateToken, hashToken } from '../common/utils/token.util';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSiteDto } from './dto/create-site.dto';
+import { SitePersonnelInputDto } from './dto/site-personnel-input.dto';
 import { UpdateSiteDto } from './dto/update-site.dto';
+
+interface PendingPersonnelInvite {
+  name: string;
+  role: string;
+  email: string;
+  token: string;
+}
 
 const CONTRACTOR_SELECT = { id: true, name: true, company: true } as const;
 const PERSONNEL_INCLUDE = {
@@ -25,6 +33,16 @@ export interface SiteWithinRadiusRow {
   longitude: Prisma.Decimal;
   geofenceRadius: number;
   distanceMeters: number;
+}
+
+export interface MapPin {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  status: string;
+  address: string;
+  constructionPhase: string | null;
 }
 
 @Injectable()
@@ -49,6 +67,7 @@ export class SitesService {
   async create(dto: CreateSiteDto, user: AuthenticatedUser, ip?: string) {
     const { contractorId, pendingContractor } = await this.resolveContractorId(dto, user);
     const invitationToken = pendingContractor ? generateToken() : undefined;
+    let personnelInvites: PendingPersonnelInvite[] = [];
 
     const created = await this.prisma.$transaction(async (tx) => {
       const site = await tx.site.create({
@@ -73,15 +92,9 @@ export class SitesService {
       });
 
       if (dto.personnel?.length) {
-        await tx.sitePersonnel.createMany({
-          data: dto.personnel.map((p) => ({
-            siteId: site.id,
-            role: p.role,
-            userId: p.userId,
-            name: p.name,
-            contact: p.contact,
-          })),
-        });
+        const { rows, invites } = this.buildPersonnelRows(dto.personnel, site.id);
+        personnelInvites = invites;
+        await tx.sitePersonnel.createMany({ data: rows });
       }
 
       if (pendingContractor && invitationToken) {
@@ -89,6 +102,7 @@ export class SitesService {
           data: {
             siteId: site.id,
             invitedUserId: pendingContractor.userId,
+            invitedEmail: pendingContractor.email,
             invitedById: user.userId,
             tokenHash: hashToken(invitationToken),
             expiresAt: new Date(Date.now() + CONTRACTOR_INVITATION_TTL_MS),
@@ -107,7 +121,7 @@ export class SitesService {
         'site.contractor_invited',
         'Site',
         created.id,
-        { invitedUserId: pendingContractor.userId },
+        { invitedEmail: pendingContractor.email },
         ip,
       );
       const developer = await this.prisma.user.findUnique({ where: { id: user.userId }, select: { name: true } });
@@ -115,14 +129,26 @@ export class SitesService {
         .sendContractorInvitation({
           to: pendingContractor.email,
           contractorName: pendingContractor.name,
-          siteName: dto.name,
+          siteName: created.name,
           developerName: developer?.name ?? 'A developer',
           token: invitationToken,
           isResend: false,
+          address: created.address,
+          latitude: Number(created.latitude),
+          longitude: Number(created.longitude),
+          constructionPhase: created.constructionPhase,
+          developmentType: created.developmentType,
+          expectedEndDate: created.expectedEndDate,
+          landmarks: created.landmarks,
         })
         .catch((err) => {
           console.error('Failed to send contractor invitation email', err);
         });
+    }
+
+    if (personnelInvites.length) {
+      const inviter = await this.prisma.user.findUnique({ where: { id: user.userId }, select: { name: true } });
+      this.sendPersonnelInvites(personnelInvites, created.name, inviter?.name ?? 'A site manager');
     }
 
     return this.findSiteOrThrow(created.id);
@@ -131,6 +157,7 @@ export class SitesService {
   async update(id: string, dto: UpdateSiteDto, user: AuthenticatedUser, ip?: string) {
     const site = await this.findSiteOrThrow(id);
     await this.assertOwnerOrAdmin(site, user);
+    let personnelInvites: PendingPersonnelInvite[] = [];
 
     await this.prisma.$transaction(async (tx) => {
       await tx.site.update({
@@ -158,15 +185,9 @@ export class SitesService {
       if (dto.personnel) {
         await tx.sitePersonnel.deleteMany({ where: { siteId: id } });
         if (dto.personnel.length) {
-          await tx.sitePersonnel.createMany({
-            data: dto.personnel.map((p) => ({
-              siteId: id,
-              role: p.role,
-              userId: p.userId,
-              name: p.name,
-              contact: p.contact,
-            })),
-          });
+          const { rows, invites } = this.buildPersonnelRows(dto.personnel, id);
+          personnelInvites = invites;
+          await tx.sitePersonnel.createMany({ data: rows });
         }
       }
     });
@@ -179,6 +200,11 @@ export class SitesService {
       { ...dto } as unknown as Prisma.InputJsonValue,
       ip,
     );
+
+    if (personnelInvites.length) {
+      const inviter = await this.prisma.user.findUnique({ where: { id: user.userId }, select: { name: true } });
+      this.sendPersonnelInvites(personnelInvites, dto.name ?? site.name, inviter?.name ?? 'A site manager');
+    }
 
     return this.findSiteOrThrow(id);
   }
@@ -237,6 +263,35 @@ export class SitesService {
     return [...ids];
   }
 
+  async findMapPins(user: AuthenticatedUser): Promise<MapPin[]> {
+    const where = user.roles.includes('administrator')
+      ? {}
+      : { id: { in: await this.resolveTiedSiteIds(user.userId) } };
+
+    const sites = await this.prisma.site.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        latitude: true,
+        longitude: true,
+        status: true,
+        address: true,
+        constructionPhase: true,
+      },
+    });
+
+    return sites.map((site) => ({
+      id: site.id,
+      name: site.name,
+      latitude: Number(site.latitude),
+      longitude: Number(site.longitude),
+      status: site.status,
+      address: site.address,
+      constructionPhase: site.constructionPhase,
+    }));
+  }
+
   private haversineDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const toRad = (deg: number) => (deg * Math.PI) / 180;
 
@@ -252,7 +307,7 @@ export class SitesService {
   private async resolveContractorId(
     dto: CreateSiteDto,
     user: AuthenticatedUser,
-  ): Promise<{ contractorId: string; pendingContractor?: { userId: string; email: string; name: string } }> {
+  ): Promise<{ contractorId: string; pendingContractor?: { userId?: string; email: string; name: string } }> {
     if (user.roles.includes('administrator')) {
       if (!dto.contractorId) {
         throw new ForbiddenException('contractorId is required when an administrator creates a site');
@@ -267,24 +322,81 @@ export class SitesService {
       return { contractorId: user.userId };
     }
 
-    const contractorEntry = dto.personnel?.find((p) => p.role === 'CONTRACTOR' && p.userId);
-    if (!contractorEntry?.userId) {
+    const contractorEntry = dto.personnel?.find((p) => p.role === 'CONTRACTOR');
+    if (!contractorEntry) {
       throw new BadRequestException(
-        'A contractor must be assigned via personnel (with a linked account) when registering a site as a developer',
+        'A contractor must be assigned via personnel when registering a site as a developer',
       );
     }
-    const invitedUser = await this.prisma.user.findFirst({
-      where: { id: contractorEntry.userId, roles: { some: { role: 'contractor' } } },
-      select: { id: true, email: true, name: true },
-    });
-    if (!invitedUser) {
-      throw new BadRequestException('The linked personnel account must have the contractor role');
+
+    if (contractorEntry.userId) {
+      const invitedUser = await this.prisma.user.findFirst({
+        where: { id: contractorEntry.userId, roles: { some: { role: 'contractor' } } },
+        select: { id: true, email: true, name: true },
+      });
+      if (!invitedUser) {
+        throw new BadRequestException('The linked personnel account must have the contractor role');
+      }
+      return {
+        contractorId: user.userId,
+        pendingContractor: { userId: invitedUser.id, email: invitedUser.email, name: invitedUser.name },
+      };
     }
 
+    // Freeform contractor — the DTO validator already guarantees an email is
+    // present for this role, since site ownership can't transfer to no one.
     return {
       contractorId: user.userId,
-      pendingContractor: { userId: invitedUser.id, email: invitedUser.email, name: invitedUser.name },
+      pendingContractor: { email: contractorEntry.email!, name: contractorEntry.name! },
     };
+  }
+
+  // Builds the SitePersonnel rows for create()/update(), generating a signup
+  // invitation token for any freeform, non-contractor entry that requested
+  // one. IDs are pre-assigned so the invite tokens can be persisted in the
+  // same createMany call, matching this row up with its emailed link.
+  private buildPersonnelRows(personnel: SitePersonnelInputDto[] | undefined, siteId: string) {
+    const invites: PendingPersonnelInvite[] = [];
+    const rows = (personnel ?? []).map((p) => {
+      const wantsInvite = p.role !== 'CONTRACTOR' && p.sendInvite && p.email && !p.userId;
+      let invitationTokenHash: string | undefined;
+      let invitationExpiresAt: Date | undefined;
+      if (wantsInvite) {
+        const token = generateToken();
+        invitationTokenHash = hashToken(token);
+        invitationExpiresAt = new Date(Date.now() + CONTRACTOR_INVITATION_TTL_MS);
+        invites.push({ name: p.name!, role: p.role, email: p.email!, token });
+      }
+      return {
+        siteId,
+        role: p.role,
+        userId: p.userId,
+        name: p.name,
+        contact: p.contact,
+        email: wantsInvite ? p.email : undefined,
+        invitationTokenHash,
+        invitationExpiresAt,
+      };
+    });
+    return { rows, invites };
+  }
+
+  private sendPersonnelInvites(invites: PendingPersonnelInvite[], siteName: string, invitedByName: string) {
+    for (const invite of invites) {
+      this.mailService
+        .sendPersonnelInvitation({
+          to: invite.email,
+          name: invite.name,
+          role: invite.role,
+          siteName,
+          invitedByName,
+          token: invite.token,
+          isResend: false,
+        })
+        .catch((err) => {
+          console.error('Failed to send personnel invitation email', err);
+        });
+    }
   }
 
   private async assertOwnerOrAdmin(site: Site, user: AuthenticatedUser) {

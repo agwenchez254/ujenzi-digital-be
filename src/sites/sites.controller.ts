@@ -19,6 +19,12 @@ export class SitesController {
     return this.sitesService.findAll();
   }
 
+  @ApiOperation({ summary: 'List map pins (all sites for administrators, tied sites for everyone else)' })
+  @Get('map')
+  findMapPins(@CurrentUser() user: AuthenticatedUser) {
+    return this.sitesService.findMapPins(user);
+  }
+
   @ApiOperation({ summary: 'Get a site by id' })
   @Get(':id')
   findOne(@Param('id') id: string) {
