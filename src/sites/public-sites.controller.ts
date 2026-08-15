@@ -26,8 +26,8 @@ export class PublicSitesController {
   @Public()
   @Get(':id')
   async getPublicPage(@Param('id') id: string, @Res() res: Response) {
-    const site = await this.prisma.site.findUnique({
-      where: { id },
+    const site = await this.prisma.site.findFirst({
+      where: { id, isPubliclyShared: true },
       select: {
         name: true,
         address: true,

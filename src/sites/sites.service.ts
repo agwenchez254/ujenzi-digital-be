@@ -5,6 +5,7 @@ import { AuthenticatedUser } from '../auth/types/jwt-payload.type';
 import { generateToken, hashToken } from '../common/utils/token.util';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeEventsService } from '../realtime/realtime-events.service';
 import { CreateSiteDto } from './dto/create-site.dto';
 import { SitePersonnelInputDto } from './dto/site-personnel-input.dto';
 import { UpdateSiteDto } from './dto/update-site.dto';
@@ -51,10 +52,16 @@ export class SitesService {
     private prisma: PrismaService,
     private auditLogService: AuditLogService,
     private mailService: MailService,
+    private realtimeEventsService: RealtimeEventsService,
   ) {}
 
-  findAll() {
+  async findAll(user: AuthenticatedUser) {
+    const where = user.roles.includes('administrator')
+      ? {}
+      : { id: { in: await this.resolveTiedSiteIds(user.userId) } };
+
     return this.prisma.site.findMany({
+      where,
       include: { contractor: { select: CONTRACTOR_SELECT }, ...PERSONNEL_INCLUDE },
       orderBy: { createdAt: 'desc' },
     });
@@ -114,6 +121,13 @@ export class SitesService {
     });
 
     await this.auditLogService.log(user.userId, 'site.created', 'Site', created.id, { contractorId }, ip);
+
+    await this.realtimeEventsService.emit(
+      'site.created',
+      created,
+      { siteIds: [created.id], roles: ['administrator'] },
+      { title: 'New Site Added', body: created.name, url: `/sites/${created.id}` },
+    );
 
     if (pendingContractor && invitationToken) {
       await this.auditLogService.log(
@@ -216,6 +230,22 @@ export class SitesService {
     await this.prisma.site.delete({ where: { id } });
 
     await this.auditLogService.log(user.userId, 'site.deleted', 'Site', id, undefined, ip);
+  }
+
+  async setPublicSharing(id: string, enabled: boolean, user: AuthenticatedUser, ip?: string) {
+    const site = await this.findSiteOrThrow(id);
+    await this.assertOwnerOrAdmin(site, user);
+
+    await this.prisma.site.update({ where: { id }, data: { isPubliclyShared: enabled } });
+
+    await this.auditLogService.log(
+      user.userId,
+      enabled ? 'site.public_sharing_enabled' : 'site.public_sharing_disabled',
+      'Site',
+      id,
+      undefined,
+      ip,
+    );
   }
 
   isWithinGeofence(lat: number, lon: number, site: Site): boolean {

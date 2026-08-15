@@ -53,30 +53,52 @@ enum SitePersonnelRole {
 }
 
 model User {
-  id                   String   @id @default(uuid())
-  email                String   @unique
+  id                   String    @id @default(uuid())
+  email                String    @unique
   passwordHash         String?
-  googleId             String?  @unique
+  googleId             String?   @unique
   name                 String
   phone                String?
   company              String?
   certificationDetails String?
   avatarUrl            String?
-  status               String   @default("active") // active | inactive
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  status               String    @default("active") // active | inactive
+  // Email changes require re-verification since email doubles as the login
+  // identifier — the new address only takes effect once its link is clicked.
+  pendingEmail         String?
+  emailChangeTokenHash String?
+  emailChangeExpiresAt DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
-  roles            UserRole[]
-  refreshTokens    RefreshToken[]
-  sitesOwned       Site[]              @relation("ContractorSites")
-  requestsMade     InspectionRequest[] @relation("ContractorRequests")
-  requestsAssigned InspectionRequest[] @relation("EngineerRequests")
-  inspections      Inspection[]
-  auditLogs        AuditLog[]
-  sitePersonnel     SitePersonnel[]
-  pushSubscriptions PushSubscription[]
+  roles                         UserRole[]
+  refreshTokens                 RefreshToken[]
+  sitesOwned                    Site[]                 @relation("ContractorSites")
+  requestsMade                  InspectionRequest[]    @relation("ContractorRequests")
+  requestsAssigned              InspectionRequest[]    @relation("EngineerRequests")
+  inspections                   Inspection[]
+  auditLogs                     AuditLog[]
+  sitePersonnel                 SitePersonnel[]
+  pushSubscriptions             PushSubscription[]
   contractorInvitationsReceived ContractorInvitation[] @relation("InvitedContractor")
   contractorInvitationsSent     ContractorInvitation[] @relation("InvitingDeveloper")
+  notifications                 Notification[]
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String
+  type      String
+  title     String
+  body      String
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
 }
 
 model UserRole {
@@ -99,16 +121,16 @@ model RefreshToken {
 }
 
 model Site {
-  id                String           @id @default(uuid())
+  id                String                                @id @default(uuid())
   name              String
   contractorId      String
-  latitude          Decimal          @db.Decimal(10, 8)
-  longitude         Decimal          @db.Decimal(11, 8)
+  latitude          Decimal                               @db.Decimal(10, 8)
+  longitude         Decimal                               @db.Decimal(11, 8)
   location          Unsupported("geography(Point,4326)")?
-  geofenceRadius    Int              @default(500)
+  geofenceRadius    Int                                   @default(500)
   address           String
   constructionPhase String?
-  status            String           @default("active") // active | inactive
+  status            String                                @default("active") // active | inactive
   developmentType   DevelopmentType?
   country           String?
   county            String?
@@ -116,12 +138,13 @@ model Site {
   town              String?
   plotNumber        String?
   expectedEndDate   DateTime?
-  landmarks         String[]         @default([])
+  landmarks         String[]                              @default([])
   approvals         Json?
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
+  isPubliclyShared  Boolean                               @default(false)
+  createdAt         DateTime                              @default(now())
+  updatedAt         DateTime                              @updatedAt
 
-  contractor  User                @relation("ContractorSites", fields: [contractorId], references: [id])
+  contractor  User                  @relation("ContractorSites", fields: [contractorId], references: [id])
   requests    InspectionRequest[]
   inspections Inspection[]
   personnel   SitePersonnel[]
@@ -136,6 +159,13 @@ model SitePersonnel {
   name    String?
   contact String?
 
+  // Set only for a freeform entry that opted into a signup invitation —
+  // mandatory for CONTRACTOR, optional for every other role.
+  email                String?
+  invitationTokenHash  String?
+  invitationExpiresAt  DateTime?
+  invitationAcceptedAt DateTime?
+
   site Site  @relation(fields: [siteId], references: [id], onDelete: Cascade)
   user User? @relation(fields: [userId], references: [id])
 
@@ -146,7 +176,10 @@ model SitePersonnel {
 model ContractorInvitation {
   id            String    @id @default(uuid())
   siteId        String    @unique
-  invitedUserId String
+  // Null until the invited email actually has (or creates) an account —
+  // a freeform-contact invite starts with no user to point at yet.
+  invitedUserId String?
+  invitedEmail  String
   invitedById   String
   tokenHash     String
   expiresAt     DateTime
@@ -154,9 +187,9 @@ model ContractorInvitation {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  site      Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  invited   User @relation("InvitedContractor", fields: [invitedUserId], references: [id])
-  invitedBy User @relation("InvitingDeveloper", fields: [invitedById], references: [id])
+  site      Site  @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  invited   User? @relation("InvitedContractor", fields: [invitedUserId], references: [id])
+  invitedBy User  @relation("InvitingDeveloper", fields: [invitedById], references: [id])
 
   @@index([invitedUserId])
 }
@@ -216,7 +249,7 @@ model Inspection {
 model Media {
   id           String   @id @default(uuid())
   inspectionId String
-  type         String   // photo | video
+  type         String // photo | video
   url          String
   latitude     Decimal? @db.Decimal(10, 8)
   longitude    Decimal? @db.Decimal(11, 8)

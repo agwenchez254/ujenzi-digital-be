@@ -4,6 +4,7 @@ import type { AuthenticatedUser } from '../auth/types/jwt-payload.type';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CreateSiteDto } from './dto/create-site.dto';
+import { SetPublicSharingDto } from './dto/set-public-sharing.dto';
 import { UpdateSiteDto } from './dto/update-site.dto';
 import { SitesService } from './sites.service';
 
@@ -13,10 +14,10 @@ import { SitesService } from './sites.service';
 export class SitesController {
   constructor(private sitesService: SitesService) {}
 
-  @ApiOperation({ summary: 'List all sites' })
+  @ApiOperation({ summary: 'List sites (all sites for administrators, tied sites for everyone else)' })
   @Get()
-  findAll() {
-    return this.sitesService.findAll();
+  findAll(@CurrentUser() user: AuthenticatedUser) {
+    return this.sitesService.findAll(user);
   }
 
   @ApiOperation({ summary: 'List map pins (all sites for administrators, tied sites for everyone else)' })
@@ -55,5 +56,21 @@ export class SitesController {
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser, @Ip() ip: string) {
     return this.sitesService.remove(id, user, ip);
+  }
+
+  @ApiOperation({
+    summary:
+      'Enable or disable the public share page for a site (owning contractor, a linked developer, or administrator). ' +
+      'The public page at /public/sites/:id 404s for any site this has never been enabled on.',
+  })
+  @Patch(':id/sharing')
+  async setPublicSharing(
+    @Param('id') id: string,
+    @Body() dto: SetPublicSharingDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Ip() ip: string,
+  ) {
+    await this.sitesService.setPublicSharing(id, dto.enabled, user, ip);
+    return { isPubliclyShared: dto.enabled };
   }
 }
