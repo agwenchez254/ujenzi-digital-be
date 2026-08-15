@@ -144,10 +144,12 @@ export class ContractorInvitationsService {
     if (invitation.acceptedAt) {
       throw new ConflictException('This invitation has already been accepted');
     }
-    if (invitation.expiresAt.getTime() >= Date.now()) {
-      throw new BadRequestException('This invitation has not expired yet');
-    }
 
+    // No "must be expired first" guard — this doubles as the "get me the
+    // invite link again" action (e.g. to share outside of email), which is
+    // useful anytime the invitation is still pending, not just once it's
+    // expired. Rotating the token is safe either way: the old one just
+    // stops working.
     const token = generateToken();
     await this.prisma.contractorInvitation.update({
       where: { id: invitation.id },
@@ -171,6 +173,9 @@ export class ContractorInvitationsService {
       expectedEndDate: site.expectedEndDate,
       landmarks: site.landmarks,
     });
+
+    const origin = this.configService.get<string>('FRONTEND_ORIGIN') || 'http://localhost:8080';
+    return { link: buildInvitationLink(origin, token, 'contractor') };
   }
 
   private assertCanManage(site: { contractorId: string }, user: AuthenticatedUser) {
