@@ -83,7 +83,7 @@ export class RealtimeEventsService {
     return [...ids];
   }
 
-  private isOnline(userId: string): boolean {
+  isOnline(userId: string): boolean {
     const room = this.gateway.server.sockets.adapter.rooms.get(`user:${userId}`);
     return !!room && room.size > 0;
   }

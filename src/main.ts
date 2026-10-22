@@ -26,14 +26,15 @@ async function bootstrap() {
   const rawOrigins = configService.get<string>('FRONTEND_ORIGIN');
   const allowedOrigins = rawOrigins
     ? rawOrigins
-        .split(',')
-        .map((o) => o.trim())
-        .filter(Boolean)
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean)
     : [
-        'http://localhost:8080',
-        'http://localhost:5173',
-        'http://localhost:3000',
-      ];
+      'http://localhost:8080',
+      'http://localhost:8081',
+      'http://localhost:5173',
+      'http://localhost:3000',
+    ];
 
   // Always allow localhost:8080 and localhost:5173 for local development
   if (!allowedOrigins.includes('http://localhost:8080')) {
@@ -41,6 +42,10 @@ async function bootstrap() {
   }
   if (!allowedOrigins.includes('http://localhost:5173')) {
     allowedOrigins.push('http://localhost:5173');
+  }
+
+  if (!allowedOrigins.includes('http://localhost:8081')) {
+    allowedOrigins.push('http://localhost:8081');
   }
 
   app.enableCors({

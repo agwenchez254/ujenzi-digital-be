@@ -47,6 +47,12 @@ export interface PasswordResetEmail {
   token: string;
 }
 
+export interface EmailVerificationEmail {
+  to: string;
+  name: string;
+  token: string;
+}
+
 export interface InspectionAssignmentEmail {
   to: string;
   engineerName: string;
@@ -180,6 +186,18 @@ export class MailService {
     const html = renderPasswordResetHtml({ name: email.name, link });
 
     await this.dispatch(email.to, subject, text, html, link);
+  }
+
+  async sendEmailVerification(email: EmailVerificationEmail): Promise<void> {
+    const link = `${this.frontendOrigin}/verify-email?token=${email.token}`;
+    const subject = 'Verify your email address';
+    const text =
+      `Hi ${email.name},\n\n` +
+      `Welcome to Ujenzi Digital. Click the link below to verify your email address ` +
+      `(expires in 24 hours):\n${link}\n\n` +
+      `If you didn't create this account, you can ignore this email.`;
+
+    await this.dispatch(email.to, subject, text, undefined, link);
   }
 
   private async dispatch(to: string, subject: string, text: string, html: string | undefined, link: string) {

@@ -93,6 +93,7 @@ model User {
   contractorInvitationsReceived ContractorInvitation[] @relation("InvitedContractor")
   contractorInvitationsSent     ContractorInvitation[] @relation("InvitingDeveloper")
   notifications                 Notification[]
+  chatMessages                  ChatMessage[]
 }
 
 model Notification {
@@ -159,6 +160,7 @@ model Site {
   inspections Inspection[]
   personnel   SitePersonnel[]
   invitation  ContractorInvitation?
+  chatMessages ChatMessage[]
 }
 
 model SitePersonnel {
@@ -260,6 +262,7 @@ model Inspection {
   engineer User              @relation(fields: [engineerId], references: [id])
   media    Media[]
   reports  Report[]
+  chatMessages ChatMessage[]
 }
 
 model Media {
@@ -317,4 +320,25 @@ model RolePermission {
   permission String
 
   @@unique([role, permission])
+}
+
+// Group chat for a site (inspectionId null) and the discussion thread attached
+// to a single inspection (inspectionId set, siteId denormalised so access checks
+// and room fan-out never need a join).
+model ChatMessage {
+  id           String   @id @default(uuid())
+  siteId       String
+  inspectionId String?
+  authorId     String
+  body         String
+  replyToId    String?
+  createdAt    DateTime @default(now())
+
+  site       Site          @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  inspection Inspection?   @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  author     User          @relation(fields: [authorId], references: [id])
+  replyTo    ChatMessage?  @relation("ChatReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies    ChatMessage[] @relation("ChatReplies")
+
+  @@index([siteId, inspectionId, createdAt])
 }

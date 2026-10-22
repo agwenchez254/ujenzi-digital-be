@@ -11,7 +11,7 @@ interface VerifiedAccessTokenPayload extends AccessTokenPayload {
 @WebSocketGateway({ cors: { origin: true, credentials: true } })
 export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   constructor(
     private jwtService: JwtService,
@@ -19,6 +19,13 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   ) {}
 
   async handleConnection(client: Socket): Promise<void> {
+    // Other gateways (chat) await this before trusting client.data.userId,
+    // since socket.io fires their message handlers as soon as the socket opens.
+    client.data.ready = this.authenticate(client);
+    await client.data.ready;
+  }
+
+  private async authenticate(client: Socket): Promise<void> {
     const token = client.handshake.auth?.token as string | undefined;
     if (!token) {
       client.disconnect(true);
@@ -35,11 +42,20 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       return;
     }
 
+    client.data.userId = payload.sub;
+    client.data.roles = payload.roles;
+
     await client.join(`user:${payload.sub}`);
     await Promise.all(payload.roles.map((role) => client.join(`role:${role}`)));
 
     const siteIds = await this.resolveSiteIds(payload.sub);
+    client.data.siteIds = siteIds;
     await Promise.all(siteIds.map((siteId) => client.join(`site:${siteId}`)));
+
+    // First socket for this user: tell the people they work with they're online.
+    if (this.socketCount(payload.sub) === 1) {
+      this.emitPresence(siteIds, payload.sub, true);
+    }
 
     const delay = Math.max(payload.exp * 1000 - Date.now(), 0);
     client.data.expiryTimeout = setTimeout(() => client.disconnect(true), delay);
@@ -50,6 +66,21 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     if (expiryTimeout) {
       clearTimeout(expiryTimeout);
     }
+
+    // Last socket gone (not just one of several tabs): they're offline.
+    const userId = client.data?.userId as string | undefined;
+    if (userId && this.socketCount(userId) === 0) {
+      this.emitPresence((client.data.siteIds as string[] | undefined) ?? [], userId, false);
+    }
+  }
+
+  private socketCount(userId: string): number {
+    return this.server.sockets.adapter.rooms.get(`user:${userId}`)?.size ?? 0;
+  }
+
+  private emitPresence(siteIds: string[], userId: string, online: boolean): void {
+    if (!siteIds.length) return;
+    this.server.to(siteIds.map((id) => `site:${id}`)).emit('presence:update', { userId, online });
   }
 
   private async resolveSiteIds(userId: string): Promise<string[]> {

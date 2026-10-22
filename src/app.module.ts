@@ -6,6 +6,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { AuthModule } from './auth/auth.module';
+import { ChatModule } from './chat/chat.module';
 import { CommonModule } from './common/common.module';
 import { CsrfMiddleware } from './common/csrf/csrf.middleware';
 import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware';
@@ -32,6 +33,7 @@ import { UsersModule } from './users/users.module';
     CommonModule,
     AuditLogModule,
     AuthModule,
+    ChatModule,
     ContractorInvitationsModule,
     InspectionRequestsModule,
     InspectionsModule,
