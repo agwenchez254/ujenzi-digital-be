@@ -24,7 +24,9 @@ export class InspectionsService {
   ) {}
 
   async findAll(user: AuthenticatedUser) {
-    if (user.roles.includes('administrator')) {
+    // Engineers can read every inspection (as they can every inspection request),
+    // so they can follow and comment on work they are not assigned to.
+    if (user.roles.includes('administrator') || user.roles.includes('engineer')) {
       return this.prisma.inspection.findMany({
         include: INSPECTION_INCLUDE,
         orderBy: { createdAt: 'desc' },
@@ -201,7 +203,7 @@ export class InspectionsService {
   }
 
   private async assertCanView(inspection: Inspection, user: AuthenticatedUser) {
-    if (user.roles.includes('administrator')) {
+    if (user.roles.includes('administrator') || user.roles.includes('engineer')) {
       return;
     }
     if (inspection.engineerId === user.userId) {

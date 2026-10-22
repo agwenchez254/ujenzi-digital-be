@@ -123,7 +123,8 @@ export class MediaService {
   }
 
   private async assertCanView(siteId: string, engineerId: string, user: AuthenticatedUser) {
-    if (user.roles.includes('administrator')) {
+    // Read-only for any engineer; uploads, replacements and deletes still require ownership.
+    if (user.roles.includes('administrator') || user.roles.includes('engineer')) {
       return;
     }
     if (engineerId === user.userId) {

@@ -31,11 +31,23 @@ function build() {
       findMany: jest.fn(),
       create: jest.fn(),
     },
+    chatAttachment: { findUnique: jest.fn() },
     user: { findUnique: jest.fn() },
   };
   const sites = { isTiedToSite: jest.fn() };
-  const service = new ChatService(prisma as never, sites as never);
-  return { prisma, sites, service };
+  const storage = {
+    save: jest.fn(
+      async (_buf: Buffer, ns: string, name: string) => `${ns}/${name}`,
+    ),
+    delete: jest.fn().mockResolvedValue(undefined),
+    read: jest.fn().mockReturnValue('STREAM'),
+  };
+  const service = new ChatService(
+    prisma as never,
+    sites as never,
+    storage as never,
+  );
+  return { prisma, sites, storage, service };
 }
 
 const siteChannel: ResolvedChannel = {
@@ -116,6 +128,164 @@ describe('ChatService.resolveChannel', () => {
   });
 });
 
+const file = (over: Partial<Express.Multer.File> = {}) =>
+  ({
+    originalname: 'level2-slab.pdf',
+    mimetype: 'application/pdf',
+    size: 1024,
+    buffer: Buffer.from('x'),
+    ...over,
+  }) as Express.Multer.File;
+
+describe('ChatService engineer access', () => {
+  it('lets an engineer who is not on the project into the site chat', async () => {
+    const { service, prisma, sites } = build();
+    prisma.site.findUnique.mockResolvedValue({ id: 's1' });
+    sites.isTiedToSite.mockResolvedValue(false);
+    await expect(
+      service.resolveChannel('site', 's1', engineer),
+    ).resolves.toMatchObject({ room: 'chat:site:s1' });
+    expect(sites.isTiedToSite).not.toHaveBeenCalled();
+  });
+
+  it('lets an engineer comment on an inspection they are not assigned to', async () => {
+    const { service, prisma, sites } = build();
+    prisma.inspection.findUnique.mockResolvedValue({
+      id: 'i1',
+      siteId: 's1',
+      engineerId: 'someone-else',
+    });
+    sites.isTiedToSite.mockResolvedValue(false);
+    await expect(
+      service.resolveChannel('inspection', 'i1', engineer),
+    ).resolves.toMatchObject({
+      room: 'chat:inspection:i1',
+    });
+  });
+});
+
+describe('ChatService attachments', () => {
+  const created = (attachments: unknown[] = []) => ({
+    id: 'm1',
+    siteId: 's1',
+    inspectionId: 'i1',
+    body: '',
+    createdAt: new Date('2026-10-22T08:00:00Z'),
+    author: { id: 'eng-1', name: 'Njeri Kamau', avatarUrl: null },
+    attachments,
+    replyTo: null,
+  });
+
+  it('accepts a message that is only a file', async () => {
+    const { service, prisma, storage } = build();
+    prisma.chatMessage.create.mockResolvedValue(
+      created([
+        {
+          id: 'a1',
+          fileName: 'level2-slab.pdf',
+          mimeType: 'application/pdf',
+          size: 1024,
+        },
+      ]),
+    );
+    const view = await service.createMessage(inspectionChannel, {}, engineer, [
+      file(),
+    ]);
+    expect(storage.save).toHaveBeenCalledTimes(1);
+    expect(storage.save.mock.calls[0][1]).toBe('chat');
+    expect(view.attachments).toHaveLength(1);
+    expect(
+      prisma.chatMessage.create.mock.calls[0][0].data.attachments.create[0],
+    ).toMatchObject({
+      fileName: 'level2-slab.pdf',
+      mimeType: 'application/pdf',
+      size: 1024,
+    });
+  });
+
+  it('rejects an empty message with no files', async () => {
+    const { service } = build();
+    await expect(
+      service.createMessage(siteChannel, { body: ' ' }, engineer, []),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects types that could carry script (SVG, HTML, executables)', async () => {
+    const { service, storage } = build();
+    for (const bad of [
+      file({ originalname: 'x.svg', mimetype: 'image/svg+xml' }),
+      file({ originalname: 'x.html', mimetype: 'text/html' }),
+      file({ originalname: 'x.exe', mimetype: 'application/x-msdownload' }),
+    ]) {
+      await expect(
+        service.createMessage(siteChannel, { body: 'hi' }, engineer, [bad]),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    }
+    expect(storage.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized files and too many files', async () => {
+    const { service } = build();
+    await expect(
+      service.createMessage(siteChannel, { body: 'hi' }, engineer, [
+        file({ size: 16 * 1024 * 1024 }),
+      ]),
+    ).rejects.toThrow(/larger than 15 MB/);
+    await expect(
+      service.createMessage(
+        siteChannel,
+        { body: 'hi' },
+        engineer,
+        Array.from({ length: 6 }, () => file()),
+      ),
+    ).rejects.toThrow(/up to 5 files/);
+  });
+
+  it('strips path segments from the stored display name', async () => {
+    const { service, prisma } = build();
+    prisma.chatMessage.create.mockResolvedValue(created());
+    await service.createMessage(siteChannel, { body: 'hi' }, engineer, [
+      file({ originalname: '../../etc/passwd.pdf' }),
+    ]);
+    expect(
+      prisma.chatMessage.create.mock.calls[0][0].data.attachments.create[0]
+        .fileName,
+    ).toBe('passwd.pdf');
+  });
+
+  it('removes saved files again when the message insert fails', async () => {
+    const { service, prisma, storage } = build();
+    prisma.chatMessage.create.mockRejectedValue(new Error('db down'));
+    await expect(
+      service.createMessage(siteChannel, { body: 'hi' }, engineer, [
+        file(),
+        file(),
+      ]),
+    ).rejects.toThrow('db down');
+    expect(storage.delete).toHaveBeenCalledTimes(2);
+  });
+
+  it('only serves an attachment to someone allowed in its conversation', async () => {
+    const { service, prisma, sites } = build();
+    prisma.chatAttachment.findUnique.mockResolvedValue({
+      storageKey: 'chat/a.pdf',
+      fileName: 'a.pdf',
+      mimeType: 'application/pdf',
+      size: 10,
+      message: { siteId: 's1', inspectionId: null },
+    });
+    prisma.site.findUnique.mockResolvedValue({ id: 's1' });
+    sites.isTiedToSite.mockResolvedValue(false);
+
+    await expect(service.getAttachment('a1', outsider)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    await expect(service.getAttachment('a1', engineer)).resolves.toMatchObject({
+      fileName: 'a.pdf',
+    });
+  });
+});
+
 describe('ChatService.createMessage', () => {
   it('rejects a whitespace-only body', async () => {
     const { service } = build();
@@ -150,6 +320,7 @@ describe('ChatService.createMessage', () => {
       body: 'Foundation looks fine',
       createdAt: new Date('2026-10-22T08:00:00Z'),
       author: { id: 'eng-1', name: 'Njeri Kamau', avatarUrl: null },
+      attachments: [],
       replyTo: null,
     });
     const view = await service.createMessage(

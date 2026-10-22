@@ -4,8 +4,9 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 
 interface HttpErrorLike {
   status?: number;
@@ -23,9 +24,25 @@ function isHttpErrorLike(exception: unknown): exception is HttpErrorLike {
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger('Exception');
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<Request>();
+
+    const describe = (msg: unknown) =>
+      Array.isArray(msg) ? msg.join('; ') : String(msg ?? 'Unknown error');
+    const stash = (msg: unknown) => {
+      response.locals.error = { message: describe(msg) };
+    };
+    const logUnexpected = (err: unknown) => {
+      const e = err instanceof Error ? err : new Error(String(err));
+      this.logger.error(
+        `[${response.locals.requestId ?? '-'}] ${request.method} ${request.originalUrl} → ${e.name}: ${e.message}`,
+        e.stack,
+      );
+    };
 
     if (exception instanceof HttpException) {
       const statusCode = exception.getStatus();
@@ -36,6 +53,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
           ? exceptionResponse
           : ((exceptionResponse as { message?: string | string[] }).message ??
             'Internal server error');
+
+      stash(message);
+      if (statusCode >= 500) logUnexpected(exception);
 
       const error =
         typeof exceptionResponse === 'object'
@@ -48,6 +68,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     if (isHttpErrorLike(exception)) {
       const statusCode = (exception.status ?? exception.statusCode)!;
+      stash(exception.message);
+      if (statusCode >= 500) logUnexpected(exception);
       response.status(statusCode).json({
         statusCode,
         message: exception.message ?? 'Error',
@@ -56,6 +78,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
       return;
     }
 
+    stash(exception instanceof Error ? exception.message : exception);
+    logUnexpected(exception);
     response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
       message: 'Internal server error',

@@ -8,6 +8,8 @@ export interface RealtimeTargets {
   siteIds?: string[];
   roles?: AppRole[];
   userIds?: string[];
+  /** Never notified, even as an administrator (e.g. the author of a chat message). */
+  excludeUserIds?: string[];
 }
 
 @Injectable()
@@ -37,7 +39,10 @@ export class RealtimeEventsService {
       where: { role: 'administrator' },
       select: { userId: true },
     });
-    const recipientIds = new Set([...userIds, ...admins.map((a) => a.userId)]);
+    const excluded = new Set(targets.excludeUserIds ?? []);
+    const recipientIds = new Set(
+      [...userIds, ...admins.map((a) => a.userId)].filter((id) => !excluded.has(id)),
+    );
 
     if (recipientIds.size) {
       await this.prisma.notification.createMany({
@@ -51,7 +56,9 @@ export class RealtimeEventsService {
       });
     }
 
-    await Promise.all(userIds.map((userId) => this.notifyIfOffline(userId, push)));
+    await Promise.all(
+      userIds.filter((id) => !excluded.has(id)).map((userId) => this.notifyIfOffline(userId, push)),
+    );
   }
 
   private async resolveUserIds(targets: RealtimeTargets): Promise<string[]> {

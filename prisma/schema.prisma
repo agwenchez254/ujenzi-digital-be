@@ -339,6 +339,23 @@ model ChatMessage {
   author     User          @relation(fields: [authorId], references: [id])
   replyTo    ChatMessage?  @relation("ChatReplies", fields: [replyToId], references: [id], onDelete: SetNull)
   replies    ChatMessage[] @relation("ChatReplies")
+  attachments ChatAttachment[]
 
   @@index([siteId, inspectionId, createdAt])
+}
+
+// A file or image sent with a chat message. The bytes live in storage under
+// storageKey; access is always checked through the owning message's channel.
+model ChatAttachment {
+  id         String   @id @default(uuid())
+  messageId  String
+  fileName   String
+  mimeType   String
+  size       Int
+  storageKey String
+  createdAt  DateTime @default(now())
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
 }
