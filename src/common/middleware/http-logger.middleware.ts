@@ -5,7 +5,7 @@ import { NextFunction, Request, Response } from 'express';
 const MAX_BODY_CHARS = 1500;
 const SLOW_REQUEST_MS = 1000;
 const REDACTED = '[REDACTED]';
-const SENSITIVE_KEY = /pass(word)?|token|secret|authorization|cookie|otp|pin|credential|api[-_]?key|csrf/i;
+const SENSITIVE_KEY = /pass(word)?|token|secret|authorization|cookie|otp|pin|credential|api[-_]?key|csrf|private|wrapped|ciphertext|blob|signature/i;
 const SKIPPED_PATHS = [/^\/docs/, /^\/favicon/];
 
 /** Recursively masks sensitive values so they never reach the logs. */
@@ -72,7 +72,11 @@ export class HttpLoggerMiddleware implements NestMiddleware {
     const { method, originalUrl } = req;
     if (SKIPPED_PATHS.some((p) => p.test(originalUrl))) return next();
 
-    const requestId = (req.headers['x-request-id'] as string) || randomUUID().slice(0, 8);
+    const incomingId = req.headers['x-request-id'];
+    const requestId =
+      typeof incomingId === 'string' && /^[\w-]{1,64}$/.test(incomingId)
+        ? incomingId
+        : randomUUID().slice(0, 8);
     res.setHeader('x-request-id', requestId);
     res.locals.requestId = requestId;
 

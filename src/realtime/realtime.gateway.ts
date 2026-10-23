@@ -8,7 +8,7 @@ interface VerifiedAccessTokenPayload extends AccessTokenPayload {
   exp: number;
 }
 
-@WebSocketGateway({ cors: { origin: true, credentials: true } })
+@WebSocketGateway()
 export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server!: Server;
@@ -36,6 +36,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     try {
       payload = await this.jwtService.verifyAsync(token, {
         secret: process.env.JWT_ACCESS_SECRET,
+        algorithms: ['HS256'],
       });
     } catch {
       client.disconnect(true);

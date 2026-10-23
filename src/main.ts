@@ -6,10 +6,13 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule, ObserveInstrument } from './app.module';
-import { RedisIoAdapter } from './realtime/redis-io.adapter';
+import { assertSecureConfig } from './common/config/assert-secure-config';
+import { resolveAllowedOrigins } from './common/config/allowed-origins';
+import { RealtimeIoAdapter } from './realtime/realtime-io.adapter';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
+  assertSecureConfig();
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     instrument: ObserveInstrument,
   });
@@ -21,13 +24,14 @@ async function bootstrap() {
   // deploys and autoscaling scale-downs don't drop requests.
   app.enableShutdownHooks();
 
-  // Share socket.io rooms/events between instances.
-  if (process.env.REDIS_URL) {
-    const adapter = new RedisIoAdapter(app, process.env.REDIS_URL);
-    adapter.connect();
-    app.useWebSocketAdapter(adapter);
-  }
   const configService = app.get(ConfigService);
+  const allowedOrigins = resolveAllowedOrigins(configService.get<string>('FRONTEND_ORIGIN'));
+
+  // Origin allow-list and payload cap for every socket; shares rooms/events between
+  // instances when REDIS_URL is set.
+  const socketAdapter = new RealtimeIoAdapter(app, allowedOrigins, process.env.REDIS_URL);
+  socketAdapter.connect();
+  app.useWebSocketAdapter(socketAdapter);
 
   app.use(
     helmet({
@@ -40,31 +44,6 @@ async function bootstrap() {
     }),
   );
   app.use(cookieParser());
-
-  const rawOrigins = configService.get<string>('FRONTEND_ORIGIN');
-  const allowedOrigins = rawOrigins
-    ? rawOrigins
-      .split(',')
-      .map((o) => o.trim())
-      .filter(Boolean)
-    : [
-      'http://localhost:8080',
-      'http://localhost:8081',
-      'http://localhost:5173',
-      'http://localhost:3000',
-    ];
-
-  // Always allow localhost:8080 and localhost:5173 for local development
-  if (!allowedOrigins.includes('http://localhost:8080')) {
-    allowedOrigins.push('http://localhost:8080');
-  }
-  if (!allowedOrigins.includes('http://localhost:5173')) {
-    allowedOrigins.push('http://localhost:5173');
-  }
-
-  if (!allowedOrigins.includes('http://localhost:8081')) {
-    allowedOrigins.push('http://localhost:8081');
-  }
 
   app.enableCors({
     origin: (origin, callback) => {

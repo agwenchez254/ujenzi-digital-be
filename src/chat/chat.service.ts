@@ -10,6 +10,11 @@ import { AuthenticatedUser } from '../auth/types/jwt-payload.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { SitesService } from '../sites/sites.service';
 import { StorageService } from '../storage/storage.service';
+import {
+  cleanDisplayName,
+  cleanMessageText,
+  contentMatchesDeclaredType,
+} from './chat.sanitize';
 import { CreateChatMessageDto } from './dto/create-chat-message.dto';
 import {
   CHAT_ALLOWED_FILE_TYPES,
@@ -62,6 +67,12 @@ type ReceiptKind = 'delivered' | 'read';
 type MessageRow = {
   id: string;
   clientId?: string | null;
+  encrypted?: boolean;
+  ciphertext?: string | null;
+  iv?: string | null;
+  keyEpoch?: number | null;
+  senderDeviceId?: string | null;
+  signature?: string | null;
   siteId: string;
   inspectionId: string | null;
   body: string;
@@ -89,8 +100,7 @@ function humanise(value: string): string {
 /** Display name only: strips any path, control characters and over-long names. */
 function cleanFileName(original: string): string {
   const base = path.basename(original.replace(/\\/g, '/'));
-  // eslint-disable-next-line no-control-regex
-  const safe = base.replace(/[\u0000-\u001f<>:"|?*]/g, '').trim();
+  const safe = cleanDisplayName(base).replace(/[<>:"|?*]/g, '').trim();
   return (safe || 'file').slice(0, 120);
 }
 
@@ -131,8 +141,13 @@ export class ChatService {
     if (!id) {
       throw new BadRequestException('Channel id is required');
     }
+    // Administrators and engineers can normally open any conversation, but an
+    // end-to-end encrypted one is members-only: access that is not backed by a key
+    // would be no access at all, and silently staying "allowed" would mislead.
+    const encrypted = await this.isEncryptedChannel(roomFor(type, id));
     const canJoinAny =
-      user.roles.includes('administrator') || user.roles.includes('engineer');
+      !encrypted &&
+      (user.roles.includes('administrator') || user.roles.includes('engineer'));
 
     if (type === 'site') {
       const site = await this.prisma.site.findUnique({
@@ -176,6 +191,21 @@ export class ChatService {
       inspectionId: inspection.id,
       room: roomFor(type, inspection.id),
     };
+  }
+
+  /** Conversation is end-to-end encrypted: keys exist for it, or the server is set to require it everywhere. */
+  async isEncryptedChannel(room: string): Promise<boolean> {
+    if (process.env.CHAT_E2EE_MODE === 'required') return true;
+    const epoch = await this.prisma.chatKeyEpoch.findFirst({
+      where: { channelKey: room },
+      select: { id: true },
+    });
+    return !!epoch;
+  }
+
+  /** Ids of everyone taking part in the conversation (sender included). */
+  async getParticipantIds(channel: ResolvedChannel): Promise<string[]> {
+    return (await this.loadParticipants(channel)).map((p) => p.user.id);
   }
 
   async listMessages(
@@ -524,11 +554,14 @@ export class ChatService {
     user: AuthenticatedUser,
     files: Express.Multer.File[] = [],
   ) {
-    const body = (dto.body ?? '').trim();
-    if (!body && files.length === 0) {
+    // For an encrypted message the server only ever holds ciphertext (checked and
+    // signature-verified by ChatKeysService before we get here).
+    const encrypted = !!dto.ciphertext;
+    const body = encrypted ? '' : cleanMessageText(dto.body ?? '').trim();
+    if (!encrypted && !body && files.length === 0) {
       throw new BadRequestException('Write a message or attach a file');
     }
-    this.validateFiles(files);
+    this.validateFiles(files, encrypted);
 
     if (dto.replyToId) {
       const parent = await this.prisma.chatMessage.findFirst({
@@ -567,10 +600,22 @@ export class ChatService {
           body,
           replyToId: dto.replyToId,
           clientId: dto.clientId || null,
+          ...(encrypted
+            ? {
+                encrypted: true,
+                ciphertext: dto.ciphertext,
+                iv: dto.iv,
+                keyEpoch: dto.keyEpoch,
+                senderDeviceId: dto.senderDeviceId,
+                signature: dto.signature,
+              }
+            : {}),
           attachments: {
             create: stored.map(({ key, file }) => ({
-              fileName: cleanFileName(file.originalname),
-              mimeType: file.mimetype,
+              // Encrypted files are opaque: the real name and type travel inside the
+              // encrypted message, so the server learns neither.
+              fileName: encrypted ? 'encrypted' : cleanFileName(file.originalname),
+              mimeType: encrypted ? 'application/octet-stream' : file.mimetype,
               size: file.size,
               storageKey: key,
             })),
@@ -723,16 +768,32 @@ export class ChatService {
     return user?.name ?? 'Someone';
   }
 
-  private validateFiles(files: Express.Multer.File[]) {
+  private validateFiles(files: Express.Multer.File[], encrypted = false) {
     if (files.length > CHAT_MAX_FILES) {
       throw new BadRequestException(
         `You can attach up to ${CHAT_MAX_FILES} files per message`,
       );
     }
     for (const file of files) {
+      if (encrypted) {
+        // The client encrypted the file before upload, so there is nothing to inspect.
+        if (file.mimetype !== 'application/octet-stream') {
+          throw new BadRequestException('Encrypted attachments must be sent as application/octet-stream');
+        }
+        if (file.size > CHAT_MAX_FILE_BYTES) {
+          throw new BadRequestException(`An attachment is larger than ${CHAT_MAX_FILE_BYTES / 1024 / 1024} MB`);
+        }
+        continue;
+      }
       if (!CHAT_ALLOWED_FILE_TYPES.has(file.mimetype)) {
         throw new BadRequestException(
           `"${cleanFileName(file.originalname)}" is not an allowed file type. Use images, PDF, Word, Excel, PowerPoint, text, CSV or ZIP files.`,
+        );
+      }
+      // The declared type came from the sender's browser; make sure the bytes agree.
+      if (!contentMatchesDeclaredType(file.buffer, file.mimetype)) {
+        throw new BadRequestException(
+          `"${cleanFileName(file.originalname)}" does not look like a valid ${file.mimetype} file`,
         );
       }
       if (file.size > CHAT_MAX_FILE_BYTES) {
@@ -758,6 +819,17 @@ export class ChatService {
       body: row.body,
       createdAt: row.createdAt.toISOString(),
       clientId: row.clientId ?? null,
+      ...(row.encrypted && row.ciphertext
+        ? {
+            e2ee: {
+              ciphertext: row.ciphertext,
+              iv: row.iv as string,
+              keyEpoch: row.keyEpoch as number,
+              senderDeviceId: row.senderDeviceId as string,
+              signature: row.signature as string,
+            },
+          }
+        : {}),
       ...(receipt ? { receipt } : {}),
       author: row.author,
       attachments: row.attachments,

@@ -9,9 +9,10 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { TokenBucket } from '../realtime/socket-rate-limit';
 import { AuthenticatedUser } from '../auth/types/jwt-payload.type';
 import { ChatService } from './chat.service';
-import { ChatMessageView, roomFor } from './chat.types';
+import { ChatMessageView, ResolvedChannel, roomFor } from './chat.types';
 
 interface ChannelPayload {
   type?: unknown;
@@ -26,6 +27,13 @@ const BACKLOG_BATCH_SIZE = 100;
 const BACKLOG_MAX_BATCHES = 5;
 const BACKLOG_ACK_TIMEOUT_MS = 10_000;
 
+// Per-socket event budget: a burst of 30, refilling 10 a second. A socket that keeps
+// hammering past it is cut off rather than left to tie up the database.
+const EVENT_BURST = 30;
+const EVENT_REFILL_PER_SECOND = 10;
+const MAX_VIOLATIONS_BEFORE_DISCONNECT = 20;
+const RATE_LIMITED: { ok: false; error: string } = { ok: false, error: 'Too many requests' };
+
 // What RealtimeGateway and this gateway stash on socket.data.
 interface SocketData {
   ready?: Promise<void>;
@@ -33,6 +41,8 @@ interface SocketData {
   roles?: AuthenticatedUser['roles'];
   chatName?: string;
   chatRooms?: Set<string>;
+  bucket?: TokenBucket;
+  violations?: number;
 }
 
 const dataOf = (client: Socket): SocketData => client.data as SocketData;
@@ -44,7 +54,7 @@ interface Ack {
 
 // Same default namespace and socket.io server as RealtimeGateway, which owns
 // authentication: it verifies the token on connect and fills client.data.
-@WebSocketGateway({ cors: { origin: true, credentials: true } })
+@WebSocketGateway()
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(ChatGateway.name);
 
@@ -67,6 +77,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() body: ChannelPayload,
   ): Promise<Ack> {
+    if (this.throttled(client)) return RATE_LIMITED;
     const user = await this.authenticatedUser(client);
     if (!user) return { ok: false, error: 'Not authenticated' };
     if (
@@ -125,6 +136,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() body: ChannelPayload,
   ): Promise<Ack> {
+    if (this.throttled(client)) return RATE_LIMITED;
     const user = await this.authenticatedUser(client);
     if (!user) return { ok: false, error: 'Not authenticated' };
     if (
@@ -151,6 +163,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() body: ChannelPayload,
   ): Promise<Ack> {
+    if (this.throttled(client)) return RATE_LIMITED;
     const user = await this.authenticatedUser(client);
     if (!user) return { ok: false, error: 'Not authenticated' };
     if (typeof body?.type !== 'string' || typeof body?.id !== 'string') {
@@ -184,6 +197,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() body: ChannelPayload,
   ): Promise<Ack> {
+    if (this.throttled(client)) return RATE_LIMITED;
     if (typeof body?.type !== 'string' || typeof body?.id !== 'string') {
       return { ok: false, error: 'Invalid channel' };
     }
@@ -199,6 +213,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() body: ChannelPayload,
   ): Promise<Ack> {
+    if (this.throttled(client)) return RATE_LIMITED;
     const user = await this.authenticatedUser(client);
     if (!user) return { ok: false, error: 'Not authenticated' };
     if (
@@ -241,6 +256,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  /** Tells everyone in the conversation to refetch its key state (new epoch or new copies). */
+  emitKeysChanged(channel: ResolvedChannel, epoch: number): void {
+    this.server.to(channel.room).emit('chat:keys', {
+      channelType: channel.type,
+      channelId: channel.inspectionId ?? channel.siteId,
+      epoch,
+    });
+  }
+
   emitMessage(message: ChatMessageView): void {
     this.server
       .to(roomFor(message.channelType, message.channelId))
@@ -269,6 +293,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         `Could not record delivery: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+  }
+
+  /** True when this socket has used up its event budget. */
+  private throttled(client: Socket): boolean {
+    const data = dataOf(client);
+    data.bucket ??= new TokenBucket(EVENT_BURST, EVENT_REFILL_PER_SECOND);
+    if (data.bucket.take()) return false;
+    data.violations = (data.violations ?? 0) + 1;
+    if (data.violations >= MAX_VIOLATIONS_BEFORE_DISCONNECT) client.disconnect(true);
+    return true;
   }
 
   private emitTyping(

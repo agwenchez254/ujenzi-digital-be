@@ -32,6 +32,7 @@ function build() {
       create: jest.fn(),
     },
     chatAttachment: { findUnique: jest.fn() },
+    chatKeyEpoch: { findFirst: jest.fn().mockResolvedValue(null) },
     user: { findUnique: jest.fn() },
   };
   const sites = { isTiedToSite: jest.fn() };
@@ -133,7 +134,7 @@ const file = (over: Partial<Express.Multer.File> = {}) =>
     originalname: 'level2-slab.pdf',
     mimetype: 'application/pdf',
     size: 1024,
-    buffer: Buffer.from('x'),
+    buffer: Buffer.from('%PDF-1.4 test'),
     ...over,
   }) as Express.Multer.File;
 

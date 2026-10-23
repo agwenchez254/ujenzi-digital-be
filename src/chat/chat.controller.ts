@@ -22,6 +22,7 @@ import type { AuthenticatedUser } from '../auth/types/jwt-payload.type';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RealtimeEventsService } from '../realtime/realtime-events.service';
 import { ChatGateway } from './chat.gateway';
+import { ChatKeysService } from './chat-keys.service';
 import { ChatService, NOTIFICATION_PREVIEW_LENGTH } from './chat.service';
 import {
   CHAT_INLINE_IMAGE_TYPES,
@@ -52,6 +53,7 @@ export class ChatController {
     private chatService: ChatService,
     private chatGateway: ChatGateway,
     private realtimeEvents: RealtimeEventsService,
+    private chatKeys: ChatKeysService,
   ) {}
 
   // Declared before the :type routes so "attachments" is never read as a channel type.
@@ -74,6 +76,8 @@ export class ChatController {
       // Only raster images render in the page; every other type downloads.
       'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(fileName)}`,
       'X-Content-Type-Options': 'nosniff',
+      // Even if something active slipped through, the browser may not run it.
+      'Content-Security-Policy': "default-src 'none'; sandbox",
       'Cache-Control': 'private, max-age=3600',
     });
     stream.on('error', () => {
@@ -175,6 +179,9 @@ export class ChatController {
       if (existing) return existing;
     }
 
+    // Encrypted messages must be signed by the sender's device, under the current key.
+    await this.chatKeys.checkSend(channel, user, dto);
+
     let message: ChatMessageView;
     try {
       message = await this.chatService.createMessage(
@@ -233,8 +240,11 @@ export class ChatController {
         ),
         this.chatService.getNotificationTarget(channel),
       ]);
-      const excerpt =
-        message.body.slice(0, NOTIFICATION_PREVIEW_LENGTH) ||
+      // The server cannot read an encrypted message, so notifications (and the push
+      // services they pass through) carry no text.
+      const excerpt = message.e2ee
+        ? 'Sent a message'
+        : message.body.slice(0, NOTIFICATION_PREVIEW_LENGTH) ||
         (message.attachments.length === 1
           ? 'Sent an attachment'
           : `Sent ${message.attachments.length} attachments`);

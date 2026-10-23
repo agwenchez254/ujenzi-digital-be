@@ -44,6 +44,15 @@ export interface ChatReceiptsEvent {
   receipts: ({ messageId: string } & MessageReceipt)[];
 }
 
+/** What the server stores for an end-to-end encrypted message; it cannot read any of it. */
+export interface EncryptedPayload {
+  ciphertext: string;
+  iv: string;
+  keyEpoch: number;
+  senderDeviceId: string;
+  signature: string;
+}
+
 export interface ChatMessageView {
   id: string;
   channelType: ChatChannelType;
@@ -54,6 +63,8 @@ export interface ChatMessageView {
   createdAt: string;
   /** Echo of the id the sender's device generated, so it can match its queued copy. */
   clientId: string | null;
+  /** Present instead of readable text on end-to-end encrypted messages (`body` is then empty). */
+  e2ee?: EncryptedPayload;
   /** Only present on the sender's own messages when they fetch history. */
   receipt?: MessageReceipt;
   author: ChatAuthor;
