@@ -15,8 +15,7 @@ export class CreateInspectionRequestDto {
   @IsString()
   notes?: string;
 
-  @ApiPropertyOptional({ format: 'uuid', description: 'Assign a specific engineer up front instead of broadcasting to all engineers.' })
-  @IsOptional()
-  @IsUUID()
-  engineerId?: string;
+  @ApiProperty({ format: 'uuid', description: 'The engineer the requester chose to inspect the site. Required.' })
+  @IsUUID(undefined, { message: 'Choose an engineer for this inspection' })
+  engineerId: string;
 }

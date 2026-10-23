@@ -161,6 +161,7 @@ model Site {
   personnel   SitePersonnel[]
   invitation  ContractorInvitation?
   chatMessages ChatMessage[]
+  documents    SiteDocument[]
 }
 
 model SitePersonnel {
@@ -358,4 +359,22 @@ model ChatAttachment {
   message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@index([messageId])
+}
+
+// A supporting file for a site: the proof behind a county / NEMA / NCA approval, or the
+// building plan. One file per kind per site; uploading again replaces it.
+model SiteDocument {
+  id           String   @id @default(uuid())
+  siteId       String
+  kind         String // COUNTY_APPROVAL | NEMA_APPROVAL | NCA_APPROVAL | BUILDING_PLAN
+  fileName     String
+  mimeType     String
+  size         Int
+  storageKey   String
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, kind])
 }

@@ -68,13 +68,13 @@ export class InspectionRequestsService {
     const site = await this.findSiteOrThrow(dto.siteId);
     await this.assertTiedOrAdmin(site.id, user);
 
-    const assignedEngineer = dto.engineerId ? await this.findEngineerOrThrow(dto.engineerId) : null;
+    const assignedEngineer = await this.findEngineerOrThrow(dto.engineerId);
 
     const request = await this.prisma.inspectionRequest.create({
       data: {
         siteId: dto.siteId,
         contractorId: site.contractorId,
-        engineerId: assignedEngineer?.id,
+        engineerId: assignedEngineer.id,
         requestedByUserId: user.userId,
         requestedDate: new Date(dto.requestedDate),
         notes: dto.notes,
@@ -87,7 +87,7 @@ export class InspectionRequestsService {
       'inspection_request.created',
       'InspectionRequest',
       request.id,
-      { siteId: dto.siteId, contractorId: site.contractorId, engineerId: assignedEngineer?.id },
+      { siteId: dto.siteId, contractorId: site.contractorId, engineerId: assignedEngineer.id },
       ip,
     );
 
@@ -98,27 +98,23 @@ export class InspectionRequestsService {
     await this.realtimeEventsService.emit(
       'inspection-request.created',
       request,
-      assignedEngineer
-        ? { userIds: [assignedEngineer.id], roles: ['administrator'] }
-        : { roles: ['engineer', 'administrator'] },
+      { userIds: [assignedEngineer.id], roles: ['administrator'] },
       {
-        title: assignedEngineer ? "You've been requested for an inspection" : 'New inspection request',
+        title: "You've been requested for an inspection",
         body: `${request.site.name} — requested by ${request.contractor.name}`,
         url: '/inspections',
       },
     );
 
-    if (assignedEngineer) {
-      await this.mailService.sendInspectionAssignmentEmail({
-        to: assignedEngineer.email,
-        engineerName: assignedEngineer.name,
-        siteName: request.site.name,
-        siteAddress: request.site.address,
-        requestedByName: request.contractor.name,
-        requestedDate: request.requestedDate,
-        notes: request.notes,
-      });
-    }
+    await this.mailService.sendInspectionAssignmentEmail({
+      to: assignedEngineer.email,
+      engineerName: assignedEngineer.name,
+      siteName: request.site.name,
+      siteAddress: request.site.address,
+      requestedByName: request.contractor.name,
+      requestedDate: request.requestedDate,
+      notes: request.notes,
+    });
 
     return request;
   }
@@ -134,11 +130,20 @@ export class InspectionRequestsService {
       contractorId = site.contractorId;
     }
 
+    // Only a request nobody has acted on yet can be handed to a different engineer;
+    // after that the accepting engineer owns it.
+    const engineerChanged = Boolean(dto.engineerId) && dto.engineerId !== request.engineerId;
+    if (engineerChanged && request.status !== 'pending') {
+      throw new ConflictException('The engineer can only be changed while the request is pending');
+    }
+    const newEngineer = engineerChanged ? await this.findEngineerOrThrow(dto.engineerId as string) : null;
+
     const updated = await this.prisma.inspectionRequest.update({
       where: { id },
       data: {
         siteId: dto.siteId,
         contractorId,
+        engineerId: newEngineer?.id,
         notes: dto.notes,
         requestedDate: dto.requestedDate ? new Date(dto.requestedDate) : undefined,
       },
@@ -146,6 +151,41 @@ export class InspectionRequestsService {
     });
 
     await this.auditLogService.log(user.userId, 'inspection_request.updated', 'InspectionRequest', id, { ...dto }, ip);
+
+    if (newEngineer) {
+      await this.realtimeEventsService.emit(
+        'inspection-request.reassigned',
+        updated,
+        { userIds: [newEngineer.id], roles: ['administrator'] },
+        {
+          title: "You've been requested for an inspection",
+          body: `${updated.site.name} - requested by ${updated.contractor.name}`,
+          url: '/inspections',
+        },
+      );
+      await this.mailService.sendInspectionAssignmentEmail({
+        to: newEngineer.email,
+        engineerName: newEngineer.name,
+        siteName: updated.site.name,
+        siteAddress: updated.site.address,
+        requestedByName: updated.contractor.name,
+        requestedDate: updated.requestedDate,
+        notes: updated.notes,
+      });
+      // The engineer who was chosen before should stop seeing it as theirs.
+      if (request.engineerId) {
+        await this.realtimeEventsService.emit(
+          'inspection-request.unassigned',
+          updated,
+          { userIds: [request.engineerId] },
+          {
+            title: 'Inspection request reassigned',
+            body: `${updated.site.name} was assigned to another engineer`,
+            url: '/inspections',
+          },
+        );
+      }
+    }
 
     return updated;
   }
