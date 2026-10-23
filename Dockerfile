@@ -21,7 +21,8 @@ COPY tsconfig*.json nest-cli.json ./
 COPY src ./src
 
 # Provide build-time DATABASE_URL for Prisma schema validation
-ENV DATABASE_URL="postgresql://postgres:agwenchez@Agwenchez254:5433/ujenzi_digital?schema=public"
+# Placeholder only: `prisma generate` needs a syntactically valid URL, never connects.
+ENV DATABASE_URL="postgresql://build:build@localhost:5432/build?schema=public"
 
 # Generate Prisma Client & Build the application
 RUN pnpm exec prisma generate
@@ -60,4 +61,7 @@ RUN mkdir -p /app/uploads
 
 EXPOSE 3000
 
+HEALTHCHECK --interval=15s --timeout=3s --start-period=30s --retries=3   CMD wget -qO- http://127.0.0.1:${PORT}/health/live || exit 1
+
+# exec form + node as PID 1 receives SIGTERM directly (graceful shutdown hooks).
 CMD ["node", "dist/main"]

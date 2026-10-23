@@ -46,6 +46,7 @@ export class InspectionRequestsService {
   async findAll(user: AuthenticatedUser) {
     if (this.canSeeAll(user)) {
       return this.prisma.inspectionRequest.findMany({
+        where: { site: { deletedAt: null } },
         include: REQUEST_INCLUDE,
         orderBy: { createdAt: 'desc' },
       });
@@ -317,7 +318,7 @@ export class InspectionRequestsService {
 
   private async findSiteOrThrow(siteId: string): Promise<Site> {
     const site = await this.prisma.site.findUnique({ where: { id: siteId } });
-    if (!site) {
+    if (!site || site.deletedAt) {
       throw new NotFoundException('Site not found');
     }
     return site;

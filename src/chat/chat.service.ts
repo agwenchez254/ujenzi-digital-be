@@ -114,9 +114,9 @@ export class ChatService {
     if (type === 'site') {
       const site = await this.prisma.site.findUnique({
         where: { id },
-        select: { id: true },
+        select: { id: true, deletedAt: true },
       });
-      if (!site) {
+      if (!site || site.deletedAt) {
         throw new NotFoundException('Site not found');
       }
       if (

@@ -1,5 +1,6 @@
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
@@ -8,7 +9,14 @@ import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Behind nginx/an LB req.ip is the proxy's address unless this is set, which
+  // collapses every client into one rate-limit bucket and corrupts audit-log IPs.
+  app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 1));
+  // Let SIGTERM drain in-flight requests and close the DB pool, so rolling
+  // deploys and autoscaling scale-downs don't drop requests.
+  app.enableShutdownHooks();
   const configService = app.get(ConfigService);
 
   app.use(
@@ -84,6 +92,10 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, swaggerDocument);
 
   const port = configService.get<number>('PORT') ?? 5000;
-  await app.listen(port);
+  const server = await app.listen(port);
+  // Keep-alive must outlast the proxy's idle timeout, otherwise the proxy reuses a
+  // socket Node just closed and clients see sporadic 502s.
+  server.keepAliveTimeout = 65_000;
+  server.headersTimeout = 66_000;
 }
 bootstrap();

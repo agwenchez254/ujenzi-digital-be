@@ -28,13 +28,14 @@ export class InspectionsService {
     // so they can follow and comment on work they are not assigned to.
     if (user.roles.includes('administrator') || user.roles.includes('engineer')) {
       return this.prisma.inspection.findMany({
+        where: { site: { deletedAt: null } },
         include: INSPECTION_INCLUDE,
         orderBy: { createdAt: 'desc' },
       });
     }
     const siteIds = await this.sitesService.resolveTiedSiteIds(user.userId);
     return this.prisma.inspection.findMany({
-      where: { OR: [{ siteId: { in: siteIds } }, { engineerId: user.userId }] },
+      where: { site: { deletedAt: null }, OR: [{ siteId: { in: siteIds } }, { engineerId: user.userId }] },
       include: INSPECTION_INCLUDE,
       orderBy: { createdAt: 'desc' },
     });

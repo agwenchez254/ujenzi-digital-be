@@ -13,6 +13,7 @@ import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { ContractorInvitationsModule } from './contractor-invitations/contractor-invitations.module';
+import { HealthController } from './health/health.controller';
 import { InspectionRequestsModule } from './inspection-requests/inspection-requests.module';
 import { InspectionsModule } from './inspections/inspections.module';
 import { MailModule } from './mail/mail.module';
@@ -46,7 +47,7 @@ import { UsersModule } from './users/users.module';
     SitesModule,
     UsersModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, HealthController],
   providers: [
     AppService,
     // Global — previously only applied to AuthController, leaving every

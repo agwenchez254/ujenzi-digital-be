@@ -2,6 +2,7 @@ services:
   database:
     image: postgis/postgis:16-3.4
     restart: always
+    command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=256MB", "-c", "log_min_duration_statement=500"]
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
@@ -26,7 +27,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@database:5432/${DB_NAME:-ujenzi_digital}?schema=public
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@database:5432/${DB_NAME:-ujenzi_digital}?schema=public&connection_limit=${DB_POOL_SIZE:-10}&pool_timeout=10
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       CSRF_SECRET: ${CSRF_SECRET}
@@ -44,6 +45,17 @@ services:
       SMTP_FROM: ${SMTP_FROM}
     volumes:
       - uploads_data:/app/uploads
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health/ready || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
     depends_on:
       database:
         condition: service_healthy

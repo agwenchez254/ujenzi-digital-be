@@ -129,6 +129,10 @@ model RefreshToken {
   revokedAt DateTime?
   createdAt DateTime  @default(now())
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@index([expiresAt])
 }
 
 model Site {
@@ -152,6 +156,9 @@ model Site {
   landmarks         String[]                              @default([])
   approvals         Json?
   isPubliclyShared  Boolean                               @default(false)
+  // Soft delete: hidden everywhere, contents untouched, purged for good after 30 days.
+  deletedAt         DateTime?
+  deletedById       String?
   createdAt         DateTime                              @default(now())
   updatedAt         DateTime                              @updatedAt
 
@@ -162,6 +169,8 @@ model Site {
   invitation  ContractorInvitation?
   chatMessages ChatMessage[]
   documents    SiteDocument[]
+
+  @@index([deletedAt])
 }
 
 model SitePersonnel {
@@ -241,6 +250,10 @@ model InspectionRequest {
   engineer    User?        @relation("EngineerRequests", fields: [engineerId], references: [id])
   requestedBy User?        @relation("RequestedInspectionRequests", fields: [requestedByUserId], references: [id])
   inspections Inspection[]
+
+  @@index([siteId, status])
+  @@index([contractorId])
+  @@index([engineerId, status])
 }
 
 model Inspection {
@@ -264,6 +277,10 @@ model Inspection {
   media    Media[]
   reports  Report[]
   chatMessages ChatMessage[]
+
+  @@index([requestId])
+  @@index([siteId, createdAt])
+  @@index([engineerId, status])
 }
 
 model Media {
@@ -277,6 +294,8 @@ model Media {
   createdAt    DateTime @default(now())
 
   inspection Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+
+  @@index([inspectionId])
 }
 
 model Report {
@@ -289,6 +308,8 @@ model Report {
   createdAt         DateTime @default(now())
 
   inspection Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+
+  @@index([inspectionId])
 }
 
 model InspectionTemplate {
@@ -313,6 +334,10 @@ model AuditLog {
   createdAt  DateTime @default(now())
 
   user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
 }
 
 model RolePermission {

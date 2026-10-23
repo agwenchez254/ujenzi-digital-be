@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma, Site } from '@prisma/client';
 import { AuditLogService } from '../audit-log/audit-log.service';
@@ -7,6 +7,7 @@ import { buildInvitationLink, generateToken, hashToken } from '../common/utils/t
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeEventsService } from '../realtime/realtime-events.service';
+import { StorageService } from '../storage/storage.service';
 import { CreateSiteDto } from './dto/create-site.dto';
 import { SitePersonnelInputDto } from './dto/site-personnel-input.dto';
 import { UpdateSiteDto } from './dto/update-site.dto';
@@ -31,6 +32,12 @@ const PERSONNEL_INCLUDE = {
   },
 } as const;
 const EARTH_RADIUS_METERS = 6_371_000;
+/** A deleted site (and everything in it) is kept this long, then removed for good. */
+export const SITE_RETENTION_DAYS = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Work that is still in flight: someone is waiting on it or has started it. */
+const ONGOING_REQUEST_STATUSES = ['pending', 'accepted', 'in_progress'] as const;
+const ONGOING_INSPECTION_STATUSES = ['draft', 'in_progress'] as const;
 const CONTRACTOR_INVITATION_TTL_MS = 48 * 60 * 60 * 1000;
 
 export interface SiteWithinRadiusRow {
@@ -61,6 +68,7 @@ export class SitesService {
     private mailService: MailService,
     private realtimeEventsService: RealtimeEventsService,
     private configService: ConfigService,
+    private storage: StorageService,
   ) {}
 
   // Invitation links are only ever available in plaintext at the moment a
@@ -82,8 +90,8 @@ export class SitesService {
 
   async findAll(user: AuthenticatedUser) {
     const where = user.roles.includes('administrator')
-      ? {}
-      : { id: { in: await this.resolveTiedSiteIds(user.userId) } };
+      ? { deletedAt: null }
+      : { deletedAt: null, id: { in: await this.resolveTiedSiteIds(user.userId) } };
 
     return this.prisma.site.findMany({
       where,
@@ -316,13 +324,108 @@ export class SitesService {
     return { ...updated, personnelInvitationLinks: this.personnelInvitationLinks(invites) };
   }
 
+  /** Counts the requests and inspections on a site that are still in progress. */
+  async countOngoingWork(siteId: string): Promise<number> {
+    const [requests, inspections] = await Promise.all([
+      this.prisma.inspectionRequest.count({
+        where: { siteId, status: { in: [...ONGOING_REQUEST_STATUSES] } },
+      }),
+      this.prisma.inspection.count({
+        where: { siteId, status: { in: [...ONGOING_INSPECTION_STATUSES] } },
+      }),
+    ]);
+    return requests + inspections;
+  }
+
+  /**
+   * Soft delete: the site disappears from every list and its contents are left exactly as
+   * they were, so an administrator can restore it until it is purged after
+   * SITE_RETENTION_DAYS. A site with inspection work still in progress can only be deleted
+   * by an administrator.
+   */
   async remove(id: string, user: AuthenticatedUser, ip?: string) {
     const site = await this.findSiteOrThrow(id);
     await this.assertOwnerOrAdmin(site, user);
 
-    await this.prisma.site.delete({ where: { id } });
+    const ongoing = await this.countOngoingWork(id);
+    if (ongoing > 0 && !user.roles.includes('administrator')) {
+      throw new ForbiddenException(
+        'This site has inspections in progress, so only an administrator can delete it. Ask an administrator, or wait until the inspections are finished.',
+      );
+    }
 
-    await this.auditLogService.log(user.userId, 'site.deleted', 'Site', id, undefined, ip);
+    const deletedAt = new Date();
+    await this.prisma.site.update({ where: { id }, data: { deletedAt, deletedById: user.userId } });
+
+    const purgeAt = new Date(deletedAt.getTime() + SITE_RETENTION_DAYS * DAY_MS);
+    await this.auditLogService.log(
+      user.userId,
+      'site.deleted',
+      'Site',
+      id,
+      { ongoingWork: ongoing, purgeAt: purgeAt.toISOString() },
+      ip,
+    );
+    return { purgeAt: purgeAt.toISOString() };
+  }
+
+  /** Deleted sites still inside the retention window (administrators only, enforced by the controller). */
+  async findDeleted() {
+    const cutoff = new Date(Date.now() - SITE_RETENTION_DAYS * DAY_MS);
+    const sites = await this.prisma.site.findMany({
+      where: { deletedAt: { not: null, gte: cutoff } },
+      select: {
+        id: true,
+        name: true,
+        address: true,
+        deletedAt: true,
+        contractor: { select: CONTRACTOR_SELECT },
+      },
+      orderBy: { deletedAt: 'desc' },
+    });
+    return sites.map((site) => ({
+      ...site,
+      purgeAt: new Date((site.deletedAt as Date).getTime() + SITE_RETENTION_DAYS * DAY_MS).toISOString(),
+    }));
+  }
+
+  async restore(id: string, user: AuthenticatedUser, ip?: string) {
+    const site = await this.findSiteOrThrow(id, { includeDeleted: true });
+    if (!site.deletedAt) {
+      throw new BadRequestException('This site has not been deleted');
+    }
+    if (site.deletedAt.getTime() < Date.now() - SITE_RETENTION_DAYS * DAY_MS) {
+      throw new ConflictException('This site was deleted more than 30 days ago and can no longer be restored');
+    }
+    await this.prisma.site.update({ where: { id }, data: { deletedAt: null, deletedById: null } });
+    await this.auditLogService.log(user.userId, 'site.restored', 'Site', id, undefined, ip);
+  }
+
+  /**
+   * Permanently removes sites deleted more than SITE_RETENTION_DAYS ago, with their files.
+   * Database rows go first (cascading to requests, inspections, media and chat); the files
+   * are removed afterwards so a failure never leaves rows pointing at missing files.
+   */
+  async purgeExpired(): Promise<number> {
+    const cutoff = new Date(Date.now() - SITE_RETENTION_DAYS * DAY_MS);
+    const expired = await this.prisma.site.findMany({
+      where: { deletedAt: { not: null, lt: cutoff } },
+      select: { id: true },
+    });
+    let purged = 0;
+    for (const { id } of expired) {
+      const [media, chatFiles, documents] = await Promise.all([
+        this.prisma.media.findMany({ where: { inspection: { siteId: id } }, select: { url: true } }),
+        this.prisma.chatAttachment.findMany({ where: { message: { siteId: id } }, select: { storageKey: true } }),
+        this.prisma.siteDocument.findMany({ where: { siteId: id }, select: { storageKey: true } }),
+      ]);
+      await this.prisma.site.delete({ where: { id } });
+      const keys = [...media.map((m) => m.url), ...chatFiles.map((c) => c.storageKey), ...documents.map((d) => d.storageKey)];
+      await Promise.all(keys.map((key) => this.storage.delete(key).catch(() => undefined)));
+      await this.auditLogService.log(null, 'site.purged', 'Site', id, { files: keys.length });
+      purged += 1;
+    }
+    return purged;
   }
 
   async setPublicSharing(id: string, enabled: boolean, user: AuthenticatedUser, ip?: string) {
@@ -358,7 +461,7 @@ export class SitesService {
         "geofenceRadius",
         ST_Distance(location, ST_SetSRID(ST_MakePoint(${lon}, ${lat}), 4326)::geography) AS "distanceMeters"
       FROM "Site"
-      WHERE ST_DWithin(location, ST_SetSRID(ST_MakePoint(${lon}, ${lat}), 4326)::geography, ${radiusMeters})
+      WHERE "deletedAt" IS NULL AND ST_DWithin(location, ST_SetSRID(ST_MakePoint(${lon}, ${lat}), 4326)::geography, ${radiusMeters})
       ORDER BY "distanceMeters" ASC
     `;
   }
@@ -377,8 +480,11 @@ export class SitesService {
 
   async resolveTiedSiteIds(userId: string): Promise<string[]> {
     const [personnelSites, ownedSites] = await Promise.all([
-      this.prisma.sitePersonnel.findMany({ where: { userId }, select: { siteId: true } }),
-      this.prisma.site.findMany({ where: { contractorId: userId }, select: { id: true } }),
+      this.prisma.sitePersonnel.findMany({
+        where: { userId, site: { deletedAt: null } },
+        select: { siteId: true },
+      }),
+      this.prisma.site.findMany({ where: { contractorId: userId, deletedAt: null }, select: { id: true } }),
     ]);
     const ids = new Set<string>();
     personnelSites.forEach((p) => ids.add(p.siteId));
@@ -388,8 +494,8 @@ export class SitesService {
 
   async findMapPins(user: AuthenticatedUser): Promise<MapPin[]> {
     const where = user.roles.includes('administrator')
-      ? {}
-      : { id: { in: await this.resolveTiedSiteIds(user.userId) } };
+      ? { deletedAt: null }
+      : { deletedAt: null, id: { in: await this.resolveTiedSiteIds(user.userId) } };
 
     const sites = await this.prisma.site.findMany({
       where,
@@ -534,12 +640,12 @@ export class SitesService {
     }
   }
 
-  private async findSiteOrThrow(id: string) {
+  private async findSiteOrThrow(id: string, opts: { includeDeleted?: boolean } = {}) {
     const site = await this.prisma.site.findUnique({
       where: { id },
       include: { contractor: { select: CONTRACTOR_SELECT }, ...PERSONNEL_INCLUDE },
     });
-    if (!site) {
+    if (!site || (site.deletedAt && !opts.includeDeleted)) {
       throw new NotFoundException('Site not found');
     }
     return site;

@@ -27,6 +27,13 @@ export class SitesController {
     return this.sitesService.findMapPins(user);
   }
 
+  @ApiOperation({ summary: 'List sites deleted in the last 30 days, which can still be restored (administrators)' })
+  @Roles('administrator')
+  @Get('deleted')
+  findDeleted() {
+    return this.sitesService.findDeleted();
+  }
+
   @ApiOperation({ summary: 'Get a site by id' })
   @Get(':id')
   findOne(@Param('id') id: string) {
@@ -52,11 +59,23 @@ export class SitesController {
     return this.sitesService.update(id, dto, user, ip);
   }
 
-  @ApiOperation({ summary: 'Delete a site (owning contractor or administrator)' })
+  @ApiOperation({
+    summary:
+      'Delete a site (owning contractor or administrator). Soft delete: contents are kept for 30 days. ' +
+      'A site with inspections in progress can only be deleted by an administrator.',
+  })
   @Roles('contractor', 'administrator')
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser, @Ip() ip: string) {
     return this.sitesService.remove(id, user, ip);
+  }
+
+  @ApiOperation({ summary: 'Restore a deleted site within its 30 day retention window (administrators)' })
+  @Roles('administrator')
+  @Post(':id/restore')
+  async restore(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser, @Ip() ip: string) {
+    await this.sitesService.restore(id, user, ip);
+    return { success: true };
   }
 
   @ApiOperation({
