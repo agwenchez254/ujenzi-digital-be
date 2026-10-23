@@ -1,5 +1,6 @@
 import { MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import Redis from 'ioredis';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
@@ -22,14 +23,32 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { PersonnelInvitationsModule } from './personnel-invitations/personnel-invitations.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { REDIS_CLIENT, RedisModule } from './redis/redis.module';
+import { RedisThrottlerStorage } from './redis/redis-throttler.storage';
 import { RealtimeModule } from './realtime/realtime.module';
 import { SitesModule } from './sites/sites.module';
 import { UsersModule } from './users/users.module';
+import { createObserveModule } from '@nestjs/observe';
+
+export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
 @Module({
   imports: [
+    ObserveModule.forRoot({
+      appKey: process.env.OBSERVE_APP_KEY,
+      appSecret: process.env.OBSERVE_APP_SECRET,
+      serviceId: 'ujenzi-digital',
+    }),
     ConfigModule.forRoot({ isGlobal: true }),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 20 }]),
+    RedisModule,
+    ThrottlerModule.forRootAsync({
+      inject: [REDIS_CLIENT],
+      useFactory: (redis: Redis | null) => ({
+        throttlers: [{ ttl: 60_000, limit: 20 }],
+        // Shared counters when Redis is configured, in-memory otherwise.
+        ...(redis ? { storage: new RedisThrottlerStorage(redis) } : {}),
+      }),
+    }),
     PrismaModule,
     CommonModule,
     AuditLogModule,

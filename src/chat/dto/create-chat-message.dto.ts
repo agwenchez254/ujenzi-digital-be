@@ -18,4 +18,14 @@ export class CreateChatMessageDto {
   @IsOptional()
   @IsUUID()
   replyToId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Id generated on the sending device. Retrying a send with the same clientId (e.g. after reconnecting) returns the original message instead of posting a duplicate.',
+    maxLength: 64,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  clientId?: string;
 }

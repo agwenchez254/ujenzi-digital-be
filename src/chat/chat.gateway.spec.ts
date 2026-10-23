@@ -27,6 +27,11 @@ function build() {
   const chatService = {
     resolveChannel: jest.fn(),
     getUserName: jest.fn().mockResolvedValue('Njeri Kamau'),
+    collectBacklog: jest.fn().mockResolvedValue([]),
+    markDelivered: jest.fn().mockResolvedValue(undefined),
+    acknowledge: jest.fn().mockResolvedValue(undefined),
+    markRead: jest.fn().mockResolvedValue(undefined),
+    setReceiptPublisher: jest.fn(),
   };
   const gateway = new ChatGateway(chatService as never);
   return { gateway, chatService };
@@ -129,5 +134,98 @@ describe('ChatGateway', () => {
         })
       ).ok,
     ).toBe(false);
+  });
+
+  describe('offline backlog', () => {
+    const msg = (id: string) => ({ id, channelType: 'site', channelId: 's1', createdAt: '2026-10-23T10:00:00.000Z' });
+    const backlogClient = (ack: () => Promise<unknown>) => {
+      const emitWithAck = jest.fn(ack);
+      return {
+        emitWithAck,
+        client: {
+          data: { ready: Promise.resolve(), userId: 'u1', roles: [], siteIds: ['s1'] },
+          timeout: () => ({ emitWithAck }),
+        },
+      };
+    };
+
+    it('replays missed messages on connect and records delivery once acked', async () => {
+      const { gateway, chatService } = build();
+      chatService.collectBacklog.mockResolvedValueOnce([msg('m1'), msg('m2')]);
+      const { client, emitWithAck } = backlogClient(async () => []);
+
+      await gateway.handleConnection(client as never);
+
+      expect(chatService.collectBacklog).toHaveBeenCalledWith('u1', 100);
+      expect(emitWithAck).toHaveBeenCalledWith('chat:backlog', { messages: [msg('m1'), msg('m2')] });
+      expect(chatService.markDelivered).toHaveBeenCalledWith(['u1'], [msg('m1'), msg('m2')]);
+    });
+
+    it('does not advance the cursor when the client never acknowledges', async () => {
+      const { gateway, chatService } = build();
+      chatService.collectBacklog.mockResolvedValueOnce([msg('m1')]);
+      const { client } = backlogClient(async () => {
+        throw new Error('operation has timed out');
+      });
+
+      await expect(gateway.handleConnection(client as never)).resolves.toBeUndefined();
+      expect(chatService.markDelivered).not.toHaveBeenCalled();
+    });
+
+    it('sends nothing for a socket that never authenticated', async () => {
+      const { gateway, chatService } = build();
+      const { client } = backlogClient(async () => []);
+      client.data = { ready: Promise.resolve() } as never;
+      await gateway.handleConnection(client as never);
+      expect(chatService.collectBacklog).not.toHaveBeenCalled();
+    });
+
+    it('checks channel access before accepting an ack', async () => {
+      const { gateway, chatService } = build();
+      chatService.resolveChannel.mockRejectedValue(new ForbiddenException('nope'));
+      const { client } = fakeClient();
+      const ack = await gateway.acknowledge(client as never, { type: 'site', id: 's1', messageId: 'm1' });
+      expect(ack).toEqual({ ok: false, error: 'nope' });
+      expect(chatService.acknowledge).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('read receipts', () => {
+    it('marks the conversation read for the caller after checking access', async () => {
+      const { gateway, chatService } = build();
+      chatService.resolveChannel.mockResolvedValue({ room: 'chat:site:s1' });
+      const { client } = fakeClient();
+      const ack = await gateway.read(client as never, { type: 'site', id: 's1', messageId: 'm9' });
+      expect(ack).toEqual({ ok: true });
+      expect(chatService.markRead).toHaveBeenCalledWith({ room: 'chat:site:s1' }, 'm9', 'u1');
+    });
+
+    it('does not record a read the caller has no access to', async () => {
+      const { gateway, chatService } = build();
+      chatService.resolveChannel.mockRejectedValue(new ForbiddenException('nope'));
+      const { client } = fakeClient();
+      const ack = await gateway.read(client as never, { type: 'site', id: 's1', messageId: 'm9' });
+      expect(ack).toEqual({ ok: false, error: 'nope' });
+      expect(chatService.markRead).not.toHaveBeenCalled();
+    });
+
+    it('rejects a read without a message id', async () => {
+      const { gateway, chatService } = build();
+      const { client } = fakeClient();
+      const ack = await gateway.read(client as never, { type: 'site', id: 's1' });
+      expect(ack.ok).toBe(false);
+      expect(chatService.markRead).not.toHaveBeenCalled();
+    });
+
+    it('delivers receipt events to the user room of the author', () => {
+      const { gateway, chatService } = build();
+      const emit = jest.fn();
+      const to = jest.fn().mockReturnValue({ emit });
+      (gateway as unknown as { server: unknown }).server = { to };
+      const publish = chatService.setReceiptPublisher.mock.calls[0][0];
+      publish('author-1', { channelType: 'site', channelId: 's1', receipts: [] });
+      expect(to).toHaveBeenCalledWith('user:author-1');
+      expect(emit).toHaveBeenCalledWith('chat:receipts', { channelType: 'site', channelId: 's1', receipts: [] });
+    });
   });
 });

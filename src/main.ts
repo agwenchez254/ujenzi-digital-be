@@ -5,11 +5,14 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
-import { AppModule } from './app.module';
+import { AppModule, ObserveInstrument } from './app.module';
+import { RedisIoAdapter } from './realtime/redis-io.adapter';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    instrument: ObserveInstrument,
+  });
 
   // Behind nginx/an LB req.ip is the proxy's address unless this is set, which
   // collapses every client into one rate-limit bucket and corrupts audit-log IPs.
@@ -17,6 +20,13 @@ async function bootstrap() {
   // Let SIGTERM drain in-flight requests and close the DB pool, so rolling
   // deploys and autoscaling scale-downs don't drop requests.
   app.enableShutdownHooks();
+
+  // Share socket.io rooms/events between instances.
+  if (process.env.REDIS_URL) {
+    const adapter = new RedisIoAdapter(app, process.env.REDIS_URL);
+    adapter.connect();
+    app.useWebSocketAdapter(adapter);
+  }
   const configService = app.get(ConfigService);
 
   app.use(

@@ -31,6 +31,7 @@ import {
   type ResolvedChannel,
 } from './chat.types';
 import { CreateChatMessageDto } from './dto/create-chat-message.dto';
+import { MarkReadDto } from './dto/mark-read.dto';
 
 // Chat is chatty: well above the app-wide 20/min default, still bounded.
 const CHAT_THROTTLE = { default: { limit: 120, ttl: 60_000 } };
@@ -100,10 +101,50 @@ export class ChatController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     const channel = await this.chatService.resolveChannel(type, id, user);
-    return this.chatService.listMessages(channel, {
+    const messages = await this.chatService.listMessages(channel, {
       before,
       limit: limit ? Number(limit) : undefined,
+      viewerId: user.userId,
     });
+    // Loading the latest page means these were seen, so they are not replayed
+    // as backlog later. Paging back through older history says nothing new.
+    if (!before && messages.length) {
+      await this.chatService
+        .markDelivered([user.userId], messages)
+        .catch(() => undefined);
+    }
+    return messages;
+  }
+
+  @ApiOperation({
+    summary:
+      'Mark the conversation as read up to a message (turns the sender\'s ticks blue)',
+  })
+  @Post(':type/:id/read')
+  async markRead(
+    @Param('type') type: string,
+    @Param('id') id: string,
+    @Body() dto: MarkReadDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const channel = await this.chatService.resolveChannel(type, id, user);
+    await this.chatService.markRead(channel, dto.messageId, user.userId);
+    return { ok: true };
+  }
+
+  @ApiOperation({
+    summary:
+      'Who has received and read one of your messages (sender or administrator only)',
+  })
+  @Get(':type/:id/messages/:messageId/receipts')
+  async receipts(
+    @Param('type') type: string,
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const channel = await this.chatService.resolveChannel(type, id, user);
+    return this.chatService.getMessageReceipts(channel, messageId, user);
   }
 
   @ApiOperation({
@@ -121,13 +162,41 @@ export class ChatController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     const channel = await this.chatService.resolveChannel(type, id, user);
-    const message = await this.chatService.createMessage(
-      channel,
-      dto,
-      user,
-      files ?? [],
-    );
+
+    // A message queued while the sender was offline is retried with the same
+    // clientId; if the first attempt actually landed, hand back that message
+    // instead of posting (and notifying everyone about) a duplicate.
+    if (dto.clientId) {
+      const existing = await this.chatService.findByClientId(
+        channel,
+        user.userId,
+        dto.clientId,
+      );
+      if (existing) return existing;
+    }
+
+    let message: ChatMessageView;
+    try {
+      message = await this.chatService.createMessage(
+        channel,
+        dto,
+        user,
+        files ?? [],
+      );
+    } catch (error) {
+      // Two retries racing: the loser trips the (author, clientId) unique index.
+      if (dto.clientId && (error as { code?: string })?.code === 'P2002') {
+        const existing = await this.chatService.findByClientId(
+          channel,
+          user.userId,
+          dto.clientId,
+        );
+        if (existing) return existing;
+      }
+      throw error;
+    }
     this.chatGateway.emitMessage(message);
+    await this.chatGateway.trackDelivery(message);
     await this.notifyRecipients(channel, message, user.userId);
     return message;
   }

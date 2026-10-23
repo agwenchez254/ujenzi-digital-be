@@ -17,6 +17,18 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    restart: always
+    # Pure ephemeral state (rate-limit counters, socket.io pub/sub): no persistence
+    # needed, and evict rather than grow unbounded.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   backend:
     build:
       context: .
@@ -28,6 +40,7 @@ services:
       NODE_ENV: production
       PORT: 3000
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@database:5432/${DB_NAME:-ujenzi_digital}?schema=public&connection_limit=${DB_POOL_SIZE:-10}&pool_timeout=10
+      REDIS_URL: redis://redis:6379
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       CSRF_SECRET: ${CSRF_SECRET}
@@ -59,6 +72,10 @@ services:
     depends_on:
       database:
         condition: service_healthy
+      # Not service_healthy: the app degrades gracefully without Redis, so a Redis
+      # problem must not block the API from starting.
+      redis:
+        condition: service_started
 
 volumes:
   postgres_data:

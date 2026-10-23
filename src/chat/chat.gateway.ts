@@ -1,6 +1,8 @@
+import { Logger } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
+  OnGatewayConnection,
   OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
@@ -15,7 +17,14 @@ interface ChannelPayload {
   type?: unknown;
   id?: unknown;
   typing?: unknown;
+  messageId?: unknown;
 }
+
+// Replay is sent in batches, each confirmed by the client before the next, so a
+// long absence never produces one enormous payload.
+const BACKLOG_BATCH_SIZE = 100;
+const BACKLOG_MAX_BATCHES = 5;
+const BACKLOG_ACK_TIMEOUT_MS = 10_000;
 
 // What RealtimeGateway and this gateway stash on socket.data.
 interface SocketData {
@@ -36,11 +45,106 @@ interface Ack {
 // Same default namespace and socket.io server as RealtimeGateway, which owns
 // authentication: it verifies the token on connect and fills client.data.
 @WebSocketGateway({ cors: { origin: true, credentials: true } })
-export class ChatGateway implements OnGatewayDisconnect {
+export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  private readonly logger = new Logger(ChatGateway.name);
+
   @WebSocketServer()
   server!: Server;
 
-  constructor(private chatService: ChatService) {}
+  constructor(private chatService: ChatService) {
+    // The author's sockets all sit in their user room, whichever instance they are on.
+    this.chatService.setReceiptPublisher?.((authorId, event) => {
+      this.server.to(`user:${authorId}`).emit('chat:receipts', event);
+    });
+  }
+
+  /**
+   * The user has the conversation open and has seen everything up to `messageId`.
+   * Senders see their ticks turn blue (`chat:receipts`).
+   */
+  @SubscribeMessage('chat:read')
+  async read(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: ChannelPayload,
+  ): Promise<Ack> {
+    const user = await this.authenticatedUser(client);
+    if (!user) return { ok: false, error: 'Not authenticated' };
+    if (
+      typeof body?.type !== 'string' ||
+      typeof body?.id !== 'string' ||
+      typeof body?.messageId !== 'string'
+    ) {
+      return { ok: false, error: 'Invalid payload' };
+    }
+    try {
+      const channel = await this.chatService.resolveChannel(body.type, body.id, user);
+      await this.chatService.markRead(channel, body.messageId, user.userId);
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : 'Unable to mark as read',
+      };
+    }
+  }
+
+  /**
+   * Delivers what arrived while this user was offline. Each batch is emitted as
+   * `chat:backlog` ({ messages }) with an acknowledgement callback; the delivery
+   * cursor only advances once the client confirms, so a dropped connection mid-way
+   * simply resumes from the same point next time.
+   */
+  async handleConnection(client: Socket): Promise<void> {
+    try {
+      const user = await this.authenticatedUser(client);
+      if (!user) return;
+
+      for (let batch = 0; batch < BACKLOG_MAX_BATCHES; batch++) {
+        const messages = await this.chatService.collectBacklog(
+          user.userId,
+          BACKLOG_BATCH_SIZE,
+        );
+        if (messages.length === 0) return;
+        await client
+          .timeout(BACKLOG_ACK_TIMEOUT_MS)
+          .emitWithAck('chat:backlog', { messages });
+        await this.chatService.markDelivered([user.userId], messages);
+        if (messages.length < BACKLOG_BATCH_SIZE) return;
+      }
+    } catch (error) {
+      // No ack in time (client does not handle the event, or it dropped): leave the
+      // cursor alone so these are offered again on the next connection.
+      this.logger.debug(
+        `Backlog not confirmed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  @SubscribeMessage('chat:ack')
+  async acknowledge(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: ChannelPayload,
+  ): Promise<Ack> {
+    const user = await this.authenticatedUser(client);
+    if (!user) return { ok: false, error: 'Not authenticated' };
+    if (
+      typeof body?.type !== 'string' ||
+      typeof body?.id !== 'string' ||
+      typeof body?.messageId !== 'string'
+    ) {
+      return { ok: false, error: 'Invalid payload' };
+    }
+    try {
+      const channel = await this.chatService.resolveChannel(body.type, body.id, user);
+      await this.chatService.acknowledge(channel, body.messageId, user.userId);
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : 'Unable to acknowledge',
+      };
+    }
+  }
 
   @SubscribeMessage('chat:join')
   async join(
@@ -114,14 +218,14 @@ export class ChatGateway implements OnGatewayDisconnect {
     return { ok: true };
   }
 
-  handleDisconnect(client: Socket): void {
+  async handleDisconnect(client: Socket): Promise<void> {
     const { chatRooms: rooms, userId, chatName } = dataOf(client);
     if (!rooms || !userId) return;
 
     // Rooms are already gone at this point, so remember them ourselves to tell
     // peers this person stopped typing and (if no other tab) went offline.
     const stillOnline =
-      (this.server.sockets.adapter.rooms.get(`user:${userId}`)?.size ?? 0) > 0;
+      (await this.server.in(`user:${userId}`).fetchSockets()).length > 0;
     for (const room of rooms) {
       const [, type, id] = room.split(':');
       this.server.to(room).emit('chat:typing', {
@@ -141,6 +245,30 @@ export class ChatGateway implements OnGatewayDisconnect {
     this.server
       .to(roomFor(message.channelType, message.channelId))
       .emit('chat:message', message);
+  }
+
+  /**
+   * Whoever is in the room when a message is emitted is connected, so counts as
+   * delivered. Everyone else keeps it as backlog until they next connect.
+   */
+  async trackDelivery(message: ChatMessageView): Promise<void> {
+    try {
+      const sockets = await this.server
+        .in(roomFor(message.channelType, message.channelId))
+        .fetchSockets();
+      const userIds = [
+        ...new Set(
+          sockets
+            .map((s) => (s.data as SocketData).userId)
+            .filter((id): id is string => !!id && id !== message.author.id),
+        ),
+      ];
+      if (userIds.length) await this.chatService.markDelivered(userIds, [message]);
+    } catch (error) {
+      this.logger.warn(
+        `Could not record delivery: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   private emitTyping(

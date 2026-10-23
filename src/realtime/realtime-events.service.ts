@@ -90,13 +90,12 @@ export class RealtimeEventsService {
     return [...ids];
   }
 
-  isOnline(userId: string): boolean {
-    const room = this.gateway.server.sockets.adapter.rooms.get(`user:${userId}`);
-    return !!room && room.size > 0;
+  async isOnline(userId: string): Promise<boolean> {
+    return (await this.gateway.server.in(`user:${userId}`).fetchSockets()).length > 0;
   }
 
   private async notifyIfOffline(userId: string, push: PushContent): Promise<void> {
-    if (this.isOnline(userId)) {
+    if (await this.isOnline(userId)) {
       return;
     }
     const subscriptions = await this.prisma.pushSubscription.findMany({ where: { userId } });

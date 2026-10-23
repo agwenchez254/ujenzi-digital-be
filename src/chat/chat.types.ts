@@ -26,6 +26,24 @@ export interface ChatAttachmentView {
   size: number;
 }
 
+/** What the sender sees under their own message: sent, delivered to all recipients, or read by all. */
+export type ReceiptStatus = 'sent' | 'delivered' | 'read';
+
+export interface MessageReceipt {
+  status: ReceiptStatus;
+  /** Everyone in the conversation except the sender. */
+  recipients: number;
+  delivered: number;
+  read: number;
+}
+
+/** Pushed to the author's sockets (`chat:receipts`) when recipients receive or read their messages. */
+export interface ChatReceiptsEvent {
+  channelType: ChatChannelType;
+  channelId: string;
+  receipts: ({ messageId: string } & MessageReceipt)[];
+}
+
 export interface ChatMessageView {
   id: string;
   channelType: ChatChannelType;
@@ -34,6 +52,10 @@ export interface ChatMessageView {
   inspectionId: string | null;
   body: string;
   createdAt: string;
+  /** Echo of the id the sender's device generated, so it can match its queued copy. */
+  clientId: string | null;
+  /** Only present on the sender's own messages when they fetch history. */
+  receipt?: MessageReceipt;
   author: ChatAuthor;
   attachments: ChatAttachmentView[];
   replyTo: { id: string; body: string; authorName: string } | null;

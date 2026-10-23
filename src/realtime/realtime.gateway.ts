@@ -53,7 +53,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     await Promise.all(siteIds.map((siteId) => client.join(`site:${siteId}`)));
 
     // First socket for this user: tell the people they work with they're online.
-    if (this.socketCount(payload.sub) === 1) {
+    if ((await this.socketCount(payload.sub)) === 1) {
       this.emitPresence(siteIds, payload.sub, true);
     }
 
@@ -61,7 +61,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     client.data.expiryTimeout = setTimeout(() => client.disconnect(true), delay);
   }
 
-  handleDisconnect(client: Socket): void {
+  async handleDisconnect(client: Socket): Promise<void> {
     const expiryTimeout = client.data?.expiryTimeout as NodeJS.Timeout | undefined;
     if (expiryTimeout) {
       clearTimeout(expiryTimeout);
@@ -69,13 +69,14 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     // Last socket gone (not just one of several tabs): they're offline.
     const userId = client.data?.userId as string | undefined;
-    if (userId && this.socketCount(userId) === 0) {
+    if (userId && (await this.socketCount(userId)) === 0) {
       this.emitPresence((client.data.siteIds as string[] | undefined) ?? [], userId, false);
     }
   }
 
-  private socketCount(userId: string): number {
-    return this.server.sockets.adapter.rooms.get(`user:${userId}`)?.size ?? 0;
+  // fetchSockets spans every instance when the Redis adapter is active.
+  private async socketCount(userId: string): Promise<number> {
+    return (await this.server.in(`user:${userId}`).fetchSockets()).length;
   }
 
   private emitPresence(siteIds: string[], userId: string, online: boolean): void {
